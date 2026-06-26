@@ -485,10 +485,16 @@ function fitCamera(){
 // ── Resize ────────────────────────────────────────────────────────────────────
 function resize(){
   const W=wrap.clientWidth, H=wrap.clientHeight;
+  if(!W||!H) return;
   renderer.setSize(W,H,false);
   camera.aspect=W/H; camera.updateProjectionMatrix();
 }
-window.addEventListener("resize",resize); resize();
+window.addEventListener("resize",resize);
+if(typeof ResizeObserver !== "undefined") {
+  const resizeObserver = new ResizeObserver(() => resize());
+  resizeObserver.observe(wrap);
+}
+resize();
 
 // ── Render loop ───────────────────────────────────────────────────────────────
 (function render(){ requestAnimationFrame(render); controls.update(); renderer.render(scene,camera); })();
@@ -688,6 +694,7 @@ document.getElementById("btn-view-graph").addEventListener("click", () => {
   document.getElementById("cat-controls").hidden     = true;
   document.getElementById("btn-view-graph").classList.add("on");
   document.getElementById("btn-view-catalog").classList.remove("on");
+  requestAnimationFrame(resize);
 });
 
 document.getElementById("btn-view-catalog").addEventListener("click", () => {
