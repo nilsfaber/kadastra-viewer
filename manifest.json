@@ -1,0 +1,11 @@
+{
+  "name": "Kadastra Viewer",
+  "short_name": "Kadastra",
+  "description": "A knowledge map of humanity's path to the stars.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#0f1117",
+  "icons": []
+}

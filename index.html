@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kadastra Viewer</title>
+  <link rel="manifest" href="manifest.json">
+  <script src="lib/three.min.js"></script>
+  <script src="lib/OrbitControls.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3a; --text:#d4d8e8; --muted:#6b7094; --accent:#5b8aff; }
+    body { background:var(--bg); color:var(--text); font:13px/1.5 system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:8px 14px; display:flex; align-items:center; gap:16px; flex-shrink:0; }
+    header h1 { font-size:.9rem; letter-spacing:.15em; text-transform:uppercase; color:var(--accent); }
+    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    select,button { background:var(--bg); border:1px solid var(--border); color:var(--text); padding:4px 10px; border-radius:5px; font-size:12px; cursor:pointer; }
+    select:focus,button:hover { border-color:var(--accent); outline:none; }
+    .toggle-group { display:flex; gap:4px; }
+    .toggle-btn { padding:4px 10px; border-radius:5px; font-size:11px; font-weight:600; }
+    .toggle-btn.on { background:rgba(91,138,255,.2); border-color:var(--accent); color:var(--accent); }
+    #cv-wrap { flex:1; position:relative; }
+    canvas { display:block; width:100%; height:100%; }
+    #tip { position:fixed; pointer-events:none; background:rgba(26,29,39,.92); border:1px solid var(--border); border-radius:5px; padding:4px 8px; font-size:12px; color:var(--text); display:none; white-space:nowrap; z-index:20; }
+    #info { position:absolute; top:0; right:0; width:280px; height:100%; background:var(--surface); border-left:1px solid var(--border); padding:14px; overflow-y:auto; font-size:12px; display:none; z-index:10; }
+    #info h2 { font-size:14px; margin-bottom:8px; }
+    #info .kv { display:flex; gap:6px; margin-bottom:4px; }
+    #info .k { color:var(--muted); min-width:80px; }
+    #info .v { color:var(--text); }
+    #info p { color:var(--muted); margin-top:10px; line-height:1.6; font-size:11px; }
+
+    /* ── View toggle ── */
+    .view-btn { padding:4px 12px; border-radius:5px; font-size:12px; font-weight:600; cursor:pointer; background:var(--bg); border:1px solid var(--border); color:var(--muted); transition:border-color .15s,color .15s,background .15s; }
+    .view-btn.on { background:rgba(91,138,255,.15); border-color:var(--accent); color:var(--accent); }
+
+    /* ── Sub-controls rows (graph + catalog) ── */
+    #graph-controls, #cat-controls { background:var(--surface); border-bottom:1px solid var(--border); padding:6px 14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; flex-shrink:0; }
+    #graph-controls[hidden], #cat-controls[hidden] { display:none; }
+    .cat-stage-nav { display:flex; gap:4px; flex-wrap:wrap; }
+    .cat-stage-btn { display:flex; flex-direction:column; align-items:center; padding:4px 10px; border:1px solid var(--border); background:var(--bg); color:var(--muted); border-radius:6px; cursor:pointer; font-size:11px; line-height:1.3; transition:border-color .15s,color .15s,background .15s; }
+    .cat-stage-btn .stage-code { font-weight:600; font-size:12px; }
+    .cat-stage-btn .stage-label { font-size:10px; }
+    .cat-stage-btn:hover { border-color:var(--accent); color:var(--text); }
+    .cat-stage-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(91,138,255,.1); }
+    #cat-search { background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); padding:4px 10px; font-size:12px; width:180px; }
+    #cat-search:focus { outline:none; border-color:var(--accent); }
+
+    /* ── Catalog workspace ── */
+    #catalog-view { flex:1; overflow:hidden; display:flex; flex-direction:column; }
+    #catalog-view[hidden] { display:none; }
+    .cat-workspace { flex:1; display:flex; overflow:hidden; }
+    .cat-pane-list { flex:1; overflow-y:auto; }
+    #cat-table { width:100%; border-collapse:collapse; font-size:13px; }
+    #cat-table th { text-align:left; padding:6px 10px; color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); cursor:pointer; user-select:none; }
+    #cat-table th:hover { color:var(--text); }
+    #cat-table td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    #cat-table tbody tr { cursor:pointer; }
+    #cat-table tbody tr:hover { background:var(--surface); }
+    #cat-table tbody tr.active { background:rgba(91,138,255,.12); }
+    .cat-sort-arrow { color:var(--accent); font-size:10px; margin-left:3px; display:inline-block; width:1em; }
+    .cat-pane-detail { width:380px; flex-shrink:0; border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; display:flex; flex-direction:column; }
+    .cat-pane-detail[hidden] { display:none; }
+    .cat-detail-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 10px; border-bottom:1px solid var(--border); }
+    .cat-detail-header h2 { font-size:14px; font-weight:600; color:var(--text); }
+    .btn-close-cat { background:none; border:none; color:var(--muted); cursor:pointer; font-size:16px; padding:0 4px; }
+    .btn-close-cat:hover { color:var(--text); }
+    .cat-fields { padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+    .cat-field { display:flex; flex-direction:column; gap:2px; }
+    .cat-field .kl { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .cat-field .vl { font-size:13px; color:var(--text); }
+    .cat-field-row { display:flex; gap:14px; }
+    .cat-desc { font-size:12px; color:var(--muted); line-height:1.6; margin-top:2px; }
+    .cat-edges-section { padding:14px 16px; border-top:1px solid var(--border); flex:1; }
+    .cat-edges-section h3 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:8px; }
+    .cat-edge-dir { font-size:11px; color:var(--muted); margin:6px 0 3px; }
+    .cat-edges-section ul { list-style:none; display:flex; flex-direction:column; gap:4px; }
+    .cat-edges-section li { display:flex; align-items:center; gap:6px; font-size:12px; padding:4px 8px; background:var(--bg); border-radius:4px; border:1px solid var(--border); }
+    .cat-edge-type { font-size:10px; color:var(--muted); flex-shrink:0; }
+    .cat-edge-link { color:var(--accent); cursor:pointer; text-decoration:none; flex:1; }
+    .cat-edge-link:hover { text-decoration:underline; }
+    .badge { display:inline-block; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+    .badge-sci        { background:rgba(78,205,196,.15);  color:#4ecdc4; }
+    .badge-spec       { background:rgba(199,125,255,.15); color:#c77dff; }
+    .badge-confirmed  { background:rgba(67,214,140,.15);  color:#43d68c; }
+    .badge-unreviewed { background:rgba(245,166,35,.15);  color:#f5a623; }
+    .badge-noise      { background:rgba(255,107,107,.15); color:#ff6b6b; }
+    .cat-flag       { font-size:11px; color:var(--muted); }
+    .cat-flag-active{ color:#f5a623; }
+    .cat-empty { color:var(--muted); font-style:italic; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Kadastra</h1>
+  <div class="controls">
+    <div style="margin-left:auto;display:flex;gap:4px">
+      <button id="btn-view-catalog" class="view-btn on">Catalog</button>
+      <button id="btn-view-graph" class="view-btn">Graph</button>
+    </div>
+  </div>
+</header>
+
+<div id="graph-controls" hidden>
+  <select id="sel-stage">
+    <option value="" selected>All stages</option>
+    <option value="K0_EARTH">K0_EARTH — Terrestrial</option>
+    <option value="K0_ORBIT">K0_ORBIT — Orbital</option>
+    <option value="K0_LUNAR">K0_LUNAR — Lunar</option>
+    <option value="K0_INNER">K0_INNER — Inner System</option>
+    <option value="K0_OUTER">K0_OUTER — Outer System</option>
+    <option value="K0_REACH">K0_REACH — Interstellar Reach</option>
+    <option value="K1">K1 — Type I</option>
+    <option value="K2">K2 — Type II</option>
+  </select>
+  <div class="toggle-group">
+    <button class="toggle-btn on" data-layer="scientific">Scientific</button>
+    <button class="toggle-btn on" data-layer="speculative">Speculative</button>
+  </div>
+  <button id="btn-fit">Fit</button>
+  <span id="status">Loading…</span>
+</div>
+
+<div id="cat-controls">
+  <nav class="cat-stage-nav" id="cat-stage-nav">
+    <button class="cat-stage-btn active" data-stage="K0_EARTH"><span class="stage-code">K0_EARTH</span><span class="stage-label">Terrestrial</span></button>
+    <button class="cat-stage-btn" data-stage="K0_ORBIT"><span class="stage-code">K0_ORBIT</span><span class="stage-label">Orbital</span></button>
+    <button class="cat-stage-btn" data-stage="K0_LUNAR"><span class="stage-code">K0_LUNAR</span><span class="stage-label">Lunar</span></button>
+    <button class="cat-stage-btn" data-stage="K0_INNER"><span class="stage-code">K0_INNER</span><span class="stage-label">Inner System</span></button>
+    <button class="cat-stage-btn" data-stage="K0_OUTER"><span class="stage-code">K0_OUTER</span><span class="stage-label">Outer System</span></button>
+    <button class="cat-stage-btn" data-stage="K0_REACH"><span class="stage-code">K0_REACH</span><span class="stage-label">Interstellar Reach</span></button>
+    <button class="cat-stage-btn" data-stage="K1"><span class="stage-code">K1</span><span class="stage-label">Type I</span></button>
+    <button class="cat-stage-btn" data-stage="K2"><span class="stage-code">K2</span><span class="stage-label">Type II</span></button>
+  </nav>
+  <input type="text" id="cat-search" placeholder="Search concepts…" autocomplete="off">
+</div>
+
+<div id="cv-wrap" hidden>
+  <canvas id="cv"></canvas>
+  <div id="tip"></div>
+  <div id="info">
+    <h2 id="info-name"></h2>
+    <div class="kv"><span class="k">Stage</span><span class="v" id="info-stage"></span></div>
+    <div class="kv"><span class="k">Domain</span><span class="v" id="info-domain"></span></div>
+    <div class="kv"><span class="k">Layer</span><span class="v" id="info-layer"></span></div>
+    <div class="kv"><span class="k">Maturity</span><span class="v" id="info-maturity"></span></div>
+    <div class="kv"><span class="k">Confidence</span><span class="v" id="info-confidence"></span></div>
+    <div class="kv"><span class="k">Connections</span><span class="v" id="info-connections"></span></div>
+    <p id="info-desc"></p>
+  </div>
+</div>
+
+<div id="catalog-view">
+  <div class="cat-workspace">
+    <section class="cat-pane-list">
+      <table id="cat-table">
+        <thead>
+          <tr>
+            <th data-sort="name">Name<span class="cat-sort-arrow"></span></th>
+            <th data-sort="domain">Domain<span class="cat-sort-arrow"></span></th>
+            <th data-sort="layer">Layer<span class="cat-sort-arrow"></span></th>
+            <th data-sort="maturity">Maturity<span class="cat-sort-arrow"></span></th>
+            <th data-sort="confidence">Confidence<span class="cat-sort-arrow"></span></th>
+            <th data-sort="flags">Flags<span class="cat-sort-arrow"></span></th>
+            <th data-sort="links">Links<span class="cat-sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody id="cat-tbody">
+          <tr><td colspan="7" class="cat-empty">Select a stage above.</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <aside class="cat-pane-detail" id="cat-pane-detail" hidden>
+      <div class="cat-detail-header">
+        <h2 id="cat-detail-title">—</h2>
+        <button class="btn-close-cat" id="btn-close-cat">✕</button>
+      </div>
+      <div class="cat-fields">
+        <div class="cat-field-row">
+          <div class="cat-field"><span class="kl">Domain</span><span class="vl" id="cd-domain"></span></div>
+          <div class="cat-field"><span class="kl">Stage</span><span class="vl" id="cd-stage"></span></div>
+        </div>
+        <div class="cat-field-row">
+          <div class="cat-field"><span class="kl">Layer</span><span class="vl" id="cd-layer"></span></div>
+          <div class="cat-field"><span class="kl">Maturity</span><span class="vl" id="cd-maturity"></span></div>
+        </div>
+        <div class="cat-field-row">
+          <div class="cat-field"><span class="kl">Confidence</span><span class="vl" id="cd-confidence"></span></div>
+          <div class="cat-field"><span class="kl">Flags</span><span class="vl" id="cd-flags"></span></div>
+        </div>
+        <div class="cat-field">
+          <span class="kl">Description</span>
+          <p class="cat-desc" id="cd-description"></p>
+        </div>
+      </div>
+      <div class="cat-edges-section">
+        <h3>Edges</h3>
+        <p class="cat-edge-dir">Enables / related to →</p>
+        <ul id="cat-edges-out"></ul>
+        <p class="cat-edge-dir">← Enabled by / related from</p>
+        <ul id="cat-edges-in"></ul>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+"use strict";
+const DOMAIN_COLORS = {
+  propulsion:"#ff6b6b",energy:"#ffa94d",habitation:"#a9e34b",governance:"#4ecdc4",
+  biology:"#74c0fc",communication:"#c77dff",economics:"#f5a623",manufacturing:"#63e6be",
+  science:"#5b8aff",philosophy:"#da77f2",ai:"#ff8787",military:"#868e96",
+};
+
+let allNodes=[], allEdges=[], currentNodes=[], layerVisible={scientific:true,speculative:true}, degreeMap={};
+let selectedId=null, visEdges=[];
+let baseNCol=null, baseNSiz=null;
+let pColAttr=null, pSizAttr=null, lColAttr=null;
+const SEGS=10;
+
+// ── Three.js ──────────────────────────────────────────────────────────────────
+const wrap     = document.getElementById("cv-wrap");
+const canvas   = document.getElementById("cv");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene  = new THREE.Scene();
+scene.background = new THREE.Color(0x0f1117);
+scene.fog = new THREE.FogExp2(0x0f1117, 0.00012);
+const camera = new THREE.PerspectiveCamera(60,1,1,200000);
+
+let pointsMesh=null, linesMesh=null;
+
+// ── OrbitControls ─────────────────────────────────────────────────────────────
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.screenSpacePanning = true;
+controls.enableZoom = false; // we handle zoom ourselves for zoom-to-cursor
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+camera.position.set(0, 4000, 8000);
+
+let didDrag=false;
+canvas.addEventListener("mousedown", ()=>{ didDrag=false; });
+controls.addEventListener("change", ()=>{ didDrag=true; });
+canvas.addEventListener("mousemove", doHover);
+
+// ── Raycasting ────────────────────────────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 25;
+const tip = document.getElementById("tip");
+
+function ndcFromEvent(e){
+  const r=canvas.getBoundingClientRect();
+  return new THREE.Vector2((e.clientX-r.left)/r.width*2-1, -((e.clientY-r.top)/r.height)*2+1);
+}
+
+// Zoom to cursor — OrbitControls zoom disabled, we own the wheel entirely
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  const speed = (e.ctrlKey||e.metaKey) ? 0.008 : 0.001;
+  const dist = camera.position.distanceTo(controls.target);
+  const newDist = Math.max(100, Math.min(60000, dist*(1+e.deltaY*speed)));
+  raycaster.setFromCamera(ndcFromEvent(e), camera);
+  const D = raycaster.ray.direction;
+  const camDir = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+  const denom = D.dot(camDir);
+  if(Math.abs(denom) > 1e-4){
+    const W = new THREE.Vector3().copy(camera.position).addScaledVector(D, dist/denom);
+    controls.target.lerpVectors(W, controls.target, newDist/dist);
+  }
+  // Move camera to maintain newDist from updated target
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  camera.position.copy(controls.target).addScaledVector(dir, newDist);
+  controls.update();
+},{passive:false});
+function doHover(e){
+  if(!pointsMesh||!currentNodes.length) return;
+  raycaster.setFromCamera(ndcFromEvent(e),camera);
+  const hits=raycaster.intersectObject(pointsMesh);
+  if(hits.length){
+    const n=currentNodes[hits[0].index];
+    tip.textContent=n.name; tip.style.display="block";
+    tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY-6)+"px";
+    canvas.style.cursor="pointer";
+  } else {
+    tip.style.display="none"; canvas.style.cursor="";
+  }
+}
+canvas.addEventListener("click", e=>{
+  if(didDrag) return;
+  if(!pointsMesh||!currentNodes.length) return;
+  raycaster.setFromCamera(ndcFromEvent(e),camera);
+  const hits=raycaster.intersectObject(pointsMesh);
+  const info=document.getElementById("info");
+  if(hits.length){
+    const n=currentNodes[hits[0].index];
+    selectedId=n.id; applySelection();
+    document.getElementById("info-name").textContent      =n.name;
+    document.getElementById("info-stage").textContent     =n.stage;
+    document.getElementById("info-domain").textContent    =n.domain;
+    document.getElementById("info-layer").textContent     =n.layer;
+    document.getElementById("info-maturity").textContent  =n.maturity;
+    document.getElementById("info-confidence").textContent=n.confidence;
+    document.getElementById("info-connections").textContent=degreeMap[n.id]??0;
+    document.getElementById("info-desc").textContent      =n.description??"";
+    info.style.display="block";
+  } else {
+    selectedId=null; applySelection();
+    info.style.display="none";
+  }
+});
+
+// ── Build geometry ────────────────────────────────────────────────────────────
+function buildGraph(){
+  const sf=document.getElementById("sel-stage").value;
+  currentNodes=allNodes.filter(c=>(!sf||c.stage===sf)&&layerVisible[c.layer]);
+  const ids=new Set(currentNodes.map(c=>c.id));
+
+  // Nodes
+  const nPos=new Float32Array(currentNodes.length*3);
+  const nCol=new Float32Array(currentNodes.length*3);
+  const nSiz=new Float32Array(currentNodes.length);
+  const maxDeg=Math.max(1,...Object.values(degreeMap));
+  const tmp=new THREE.Color();
+  currentNodes.forEach((n,i)=>{
+    nPos[i*3]=n.pos_x??0; nPos[i*3+1]=n.pos_y??0; nPos[i*3+2]=n.pos_z??0;
+    tmp.set(DOMAIN_COLORS[n.domain]??"#888");
+    if(n.layer==="speculative") tmp.lerp(new THREE.Color(0xc77dff),0.35);
+    nCol[i*3]=tmp.r; nCol[i*3+1]=tmp.g; nCol[i*3+2]=tmp.b;
+    nSiz[i]=(6+16*Math.sqrt((degreeMap[n.id]??0)/maxDeg))*40;
+  });
+  baseNCol=nCol.slice(); baseNSiz=nSiz.slice();
+  const pGeo=new THREE.BufferGeometry();
+  pColAttr=new THREE.BufferAttribute(nCol,3); pColAttr.setUsage(THREE.DynamicDrawUsage);
+  pSizAttr=new THREE.BufferAttribute(nSiz,1); pSizAttr.setUsage(THREE.DynamicDrawUsage);
+  pGeo.setAttribute("position",new THREE.BufferAttribute(nPos,3));
+  pGeo.setAttribute("color",pColAttr);
+  pGeo.setAttribute("aSize",pSizAttr);
+  const pMat=new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader:`
+      attribute float aSize;
+      attribute vec3 color;
+      varying vec3 vColor;
+      void main(){
+        vColor=color;
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        gl_PointSize=aSize*(300.0/-mv.z);
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader:`
+      varying vec3 vColor;
+      void main(){
+        float r=length(gl_PointCoord-0.5)*2.0;
+        if(r>1.0) discard;
+        float a=pow(1.0-r,2.2);         // soft-disk falloff
+        float core=pow(1.0-r,8.0)*0.6;  // bright inner core
+        gl_FragColor=vec4(vColor*(a+core), a);
+      }`,
+  });
+  if(pointsMesh) scene.remove(pointsMesh);
+  pointsMesh=new THREE.Points(pGeo,pMat);
+  scene.add(pointsMesh);
+
+  // Edges — quadratic bezier arcs with per-vertex color for selection highlight
+  const nMap={}; currentNodes.forEach(n=>{nMap[n.id]=n;});
+  visEdges=allEdges.filter(e=>ids.has(e.source_id)&&ids.has(e.target_id));
+  const vertsPerEdge=SEGS*2;
+  const eBuf=new Float32Array(visEdges.length*vertsPerEdge*3);
+  const eColBuf=new Float32Array(visEdges.length*vertsPerEdge*3);
+  const dimC=new THREE.Color(0x3a3f5c);
+  let ei=0, ci=0;
+  visEdges.forEach(e=>{
+    const s=nMap[e.source_id], t=nMap[e.target_id];
+    const ax=s.pos_x??0, ay=s.pos_y??0, az=s.pos_z??0;
+    const bx=t.pos_x??0, by=t.pos_y??0, bz=t.pos_z??0;
+    const cx=(ax+bx)/2, cz=(az+bz)/2;
+    const dist=Math.sqrt((bx-ax)**2+(by-ay)**2+(bz-az)**2);
+    const cy=(ay+by)/2+dist*0.18;
+    for(let k=0;k<SEGS;k++){
+      const t0=k/SEGS, t1=(k+1)/SEGS, u0=1-t0, u1=1-t1;
+      eBuf[ei++]=u0*u0*ax+2*u0*t0*cx+t0*t0*bx;
+      eBuf[ei++]=u0*u0*ay+2*u0*t0*cy+t0*t0*by;
+      eBuf[ei++]=u0*u0*az+2*u0*t0*cz+t0*t0*bz;
+      eBuf[ei++]=u1*u1*ax+2*u1*t1*cx+t1*t1*bx;
+      eBuf[ei++]=u1*u1*ay+2*u1*t1*cy+t1*t1*by;
+      eBuf[ei++]=u1*u1*az+2*u1*t1*cz+t1*t1*bz;
+      for(let v=0;v<2;v++){ eColBuf[ci++]=dimC.r; eColBuf[ci++]=dimC.g; eColBuf[ci++]=dimC.b; }
+    }
+  });
+  const lGeo=new THREE.BufferGeometry();
+  lGeo.setAttribute("position",new THREE.BufferAttribute(eBuf,3));
+  lColAttr=new THREE.BufferAttribute(eColBuf,3); lColAttr.setUsage(THREE.DynamicDrawUsage);
+  lGeo.setAttribute("color",lColAttr);
+  const lMat=new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.5});
+  if(linesMesh) scene.remove(linesMesh);
+  linesMesh=new THREE.LineSegments(lGeo,lMat);
+  scene.add(linesMesh);
+
+  document.getElementById("status").textContent=`${currentNodes.length} concepts · ${visEdges.length} edges`;
+  tip.style.display="none";
+  applySelection();
+}
+
+function applySelection(){
+  if(!pColAttr||!pSizAttr||!lColAttr) return;
+  const nC=pColAttr.array, nS=pSizAttr.array, eC=lColAttr.array;
+  const dimC=new THREE.Color(0x3a3f5c);
+  const vertsPerEdge=SEGS*2;
+  if(selectedId===null){
+    nC.set(baseNCol); nS.set(baseNSiz);
+    for(let i=0;i<visEdges.length*vertsPerEdge;i++){
+      eC[i*3]=dimC.r; eC[i*3+1]=dimC.g; eC[i*3+2]=dimC.b;
+    }
+  } else {
+    // BFS over all edges (undirected) from selectedId, up to MAX_DEPTH hops
+    const MAX_DEPTH=4;
+    const adjAll={};
+    allEdges.forEach(e=>{
+      (adjAll[e.source_id]||(adjAll[e.source_id]=[])).push(e.target_id);
+      (adjAll[e.target_id]||(adjAll[e.target_id]=[])).push(e.source_id);
+    });
+    const dist={[selectedId]:0};
+    const queue=[selectedId];
+    for(let qi=0;qi<queue.length;qi++){
+      const cur=queue[qi];
+      if(dist[cur]>=MAX_DEPTH) continue;
+      (adjAll[cur]||[]).forEach(nb=>{
+        if(dist[nb]===undefined){ dist[nb]=dist[cur]+1; queue.push(nb); }
+      });
+    }
+    // brightness / size drop-off per hop: d=0→1.0, d=1→0.85, d=2→0.55, d=3→0.30, d=4→0.15, beyond→0.06
+    const brightScale=[1.0, 0.85, 0.55, 0.30, 0.15];
+    const sizeScale  =[1.6, 1.0,  0.8,  0.65, 0.55];
+    const DIM=0.06;
+    currentNodes.forEach((n,i)=>{
+      const d=dist[n.id];
+      if(d===undefined){
+        nC[i*3]=baseNCol[i*3]*DIM; nC[i*3+1]=baseNCol[i*3+1]*DIM; nC[i*3+2]=baseNCol[i*3+2]*DIM;
+        nS[i]=baseNSiz[i]*0.4;
+      } else if(d===0){
+        nC[i*3]=1; nC[i*3+1]=1; nC[i*3+2]=1; nS[i]=baseNSiz[i]*sizeScale[0];
+      } else {
+        const sc=brightScale[d]??DIM;
+        nC[i*3]=baseNCol[i*3]*sc; nC[i*3+1]=baseNCol[i*3+1]*sc; nC[i*3+2]=baseNCol[i*3+2]*sc;
+        nS[i]=baseNSiz[i]*(sizeScale[d]??0.4);
+      }
+    });
+    // Edge highlight: colour by the closer endpoint's distance
+    // d=1 edges → bright blue, d=2 → mid, d=3+ → progressively dimmer
+    const edgeHues=[
+      new THREE.Color(0x7baeff), // d=1
+      new THREE.Color(0x4a6faa), // d=2
+      new THREE.Color(0x334d77), // d=3
+      new THREE.Color(0x243655), // d=4
+    ];
+    visEdges.forEach((e,j)=>{
+      const ds=dist[e.source_id]??Infinity, dt=dist[e.target_id]??Infinity;
+      const edgeDist=Math.min(ds,dt);
+      const col=edgeDist<edgeHues.length ? edgeHues[edgeDist] : dimC;
+      const base=j*vertsPerEdge;
+      for(let v=0;v<vertsPerEdge;v++){
+        eC[(base+v)*3]=col.r; eC[(base+v)*3+1]=col.g; eC[(base+v)*3+2]=col.b;
+      }
+    });
+  }
+  pColAttr.needsUpdate=true; pSizAttr.needsUpdate=true; lColAttr.needsUpdate=true;
+}
+
+function fitCamera(){
+  if(!currentNodes.length) return;
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity,z0=Infinity,z1=-Infinity;
+  for(const n of currentNodes){
+    x0=Math.min(x0,n.pos_x??0); x1=Math.max(x1,n.pos_x??0);
+    y0=Math.min(y0,n.pos_y??0); y1=Math.max(y1,n.pos_y??0);
+    z0=Math.min(z0,n.pos_z??0); z1=Math.max(z1,n.pos_z??0);
+  }
+  const cx=(x0+x1)/2, cy=(y0+y1)/2, cz=(z0+z1)/2;
+  const diag=Math.sqrt((x1-x0)**2+(y1-y0)**2+(z1-z0)**2);
+  controls.target.set(cx,cy,cz);
+  camera.position.set(cx, cy+diag*0.25, cz+diag*0.65);
+  controls.update();
+}
+
+// ── Resize ────────────────────────────────────────────────────────────────────
+function resize(){
+  const W=wrap.clientWidth, H=wrap.clientHeight;
+  renderer.setSize(W,H,false);
+  camera.aspect=W/H; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize",resize); resize();
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+(function render(){ requestAnimationFrame(render); controls.update(); renderer.render(scene,camera); })();
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+document.getElementById("sel-stage").addEventListener("change",()=>{buildGraph();fitCamera();});
+document.getElementById("btn-fit").addEventListener("click",fitCamera);
+document.querySelectorAll(".toggle-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    const l=btn.dataset.layer; layerVisible[l]=!layerVisible[l];
+    btn.classList.toggle("on",layerVisible[l]); buildGraph();
+  });
+});
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+fetch("data/concept_graph.json").then(r=>r.json()).then(data=>{
+  allNodes=data.concepts; allEdges=data.edges;
+  data.edges.forEach(e=>{
+    degreeMap[e.source_id]=(degreeMap[e.source_id]??0)+1;
+    degreeMap[e.target_id]=(degreeMap[e.target_id]??0)+1;
+  });
+  buildGraph(); fitCamera();
+  buildEdgeIndex();
+  // default to catalog: select first stage
+  catStage = "K0_EARTH";
+  catLoadStage(catStage);
+});
+
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+
+// ── Catalog ───────────────────────────────────────────────────────────────────
+let catStage = null, catActiveRow = null, catAllConcepts = [];
+let catSortKey = "name", catSortDir = 1;
+let catEdgesById = {};
+
+function buildEdgeIndex() {
+  const nameMap = {};
+  allNodes.forEach(n => { nameMap[n.id] = n.name; });
+  catEdgesById = {};
+  allNodes.forEach(n => { catEdgesById[n.id] = {out: [], in: []}; });
+  allEdges.forEach(e => {
+    if (catEdgesById[e.source_id]) catEdgesById[e.source_id].out.push({...e, peer_id: e.target_id, peer_name: nameMap[e.target_id] ?? "?"});
+    if (catEdgesById[e.target_id]) catEdgesById[e.target_id].in.push({...e, peer_id: e.source_id, peer_name: nameMap[e.source_id] ?? "?"});
+  });
+}
+
+function catBadge(cls, text) { return `<span class="badge ${cls}">${text}</span>`; }
+function catConfBadge(c) {
+  return catBadge({confirmed:"badge-confirmed",unreviewed:"badge-unreviewed",noise:"badge-noise"}[c]??"", c);
+}
+function catLayerBadge(l) { return catBadge(l==="scientific"?"badge-sci":"badge-spec", l); }
+
+function catCmp(a, b) {
+  if (catSortKey === "flags") return ((b.is_barrier+b.is_choice+(b.is_enabler||0))-(a.is_barrier+a.is_choice+(a.is_enabler||0)))*catSortDir;
+  if (catSortKey === "links") return ((degreeMap[b.id]??0)-(degreeMap[a.id]??0))*catSortDir;
+  return (a[catSortKey]??"").localeCompare(b[catSortKey]??"")*catSortDir;
+}
+
+function catRenderRows(concepts) {
+  const tbody = document.getElementById("cat-tbody");
+  if (!concepts.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="cat-empty">No concepts found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = concepts.map(c => {
+    const barrier = c.is_barrier ? `<span class="cat-flag cat-flag-active" title="Barrier">⚠</span> ` : "";
+    const choice  = c.is_choice  ? `<span class="cat-flag cat-flag-active" title="Choice">⑂</span> ` : "";
+    const enabler = c.is_enabler ? `<span class="cat-flag cat-flag-active" title="Enabler">→</span>` : "";
+    return `<tr data-id="${c.id}">
+      <td>${c.name}</td>
+      <td><span class="cat-flag">${c.domain}</span></td>
+      <td>${catLayerBadge(c.layer)}</td>
+      <td><span class="cat-flag">${c.maturity}</span></td>
+      <td>${catConfBadge(c.confidence)}</td>
+      <td>${barrier}${choice}${enabler}</td>
+      <td style="color:var(--muted);font-size:11px">${degreeMap[c.id]??0}</td>
+    </tr>`;
+  }).join("");
+}
+
+function catFilterSort() {
+  const q = document.getElementById("cat-search").value.toLowerCase();
+  let cs = q ? catAllConcepts.filter(c =>
+    c.name.toLowerCase().includes(q) || c.domain.toLowerCase().includes(q)
+  ) : catAllConcepts;
+  cs = [...cs].sort(catCmp);
+  catRenderRows(cs);
+  document.querySelectorAll("#cat-table th[data-sort]").forEach(th => {
+    const arr = th.querySelector(".cat-sort-arrow");
+    arr.textContent = th.dataset.sort === catSortKey ? (catSortDir===1?" ↑":" ↓") : "";
+  });
+}
+
+function catLoadStage(stage) {
+  catAllConcepts = allNodes.filter(c => c.stage === stage);
+  catFilterSort();
+}
+
+function catOpenDetail(id) {
+  const c = allNodes.find(n => n.id === id);
+  if (!c) return;
+  document.getElementById("cat-detail-title").textContent = c.name;
+  document.getElementById("cd-domain").textContent   = c.domain;
+  document.getElementById("cd-stage").textContent    = c.stage;
+  document.getElementById("cd-layer").innerHTML      = catLayerBadge(c.layer);
+  document.getElementById("cd-maturity").textContent = c.maturity;
+  document.getElementById("cd-confidence").innerHTML = catConfBadge(c.confidence);
+  document.getElementById("cd-flags").textContent    = [
+    c.is_barrier ? "⚠ Barrier" : null,
+    c.is_choice  ? "⑂ Choice"  : null,
+    c.is_enabler ? "→ Enabler" : null,
+  ].filter(Boolean).join("  ") || "—";
+  document.getElementById("cd-description").textContent = c.description ?? "";
+
+  const edges = catEdgesById[id] || {out:[], in:[]};
+  const renderList = (ulId, items) => {
+    const ul = document.getElementById(ulId);
+    ul.innerHTML = items.length
+      ? items.map(e => `<li><span class="cat-edge-type">${e.type}</span><a class="cat-edge-link" data-id="${e.peer_id}">${e.peer_name}</a></li>`).join("")
+      : `<li style="color:var(--muted);font-size:11px">None</li>`;
+  };
+  renderList("cat-edges-out", edges.out);
+  renderList("cat-edges-in",  edges.in);
+
+  document.getElementById("cat-pane-detail").hidden = false;
+}
+
+function catCloseDetail() {
+  document.getElementById("cat-pane-detail").hidden = true;
+  if (catActiveRow) { catActiveRow.classList.remove("active"); catActiveRow = null; }
+}
+
+// Stage nav
+document.getElementById("cat-stage-nav").addEventListener("click", e => {
+  const btn = e.target.closest(".cat-stage-btn");
+  if (!btn) return;
+  document.querySelector(".cat-stage-btn.active")?.classList.remove("active");
+  btn.classList.add("active");
+  catStage = btn.dataset.stage;
+  catCloseDetail();
+  catLoadStage(catStage);
+});
+
+// Table row click
+document.getElementById("cat-tbody").addEventListener("click", e => {
+  const row = e.target.closest("tr[data-id]");
+  if (!row) return;
+  if (catActiveRow) catActiveRow.classList.remove("active");
+  catActiveRow = row;
+  row.classList.add("active");
+  catOpenDetail(parseInt(row.dataset.id));
+});
+
+// Column sort
+document.querySelector("#cat-table thead").addEventListener("click", e => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th) return;
+  const k = th.dataset.sort;
+  if (catSortKey === k) catSortDir *= -1;
+  else { catSortKey = k; catSortDir = 1; }
+  catFilterSort();
+});
+
+// Search
+document.getElementById("cat-search").addEventListener("input", catFilterSort);
+
+// Close detail
+document.getElementById("btn-close-cat").addEventListener("click", catCloseDetail);
+
+// Edge link navigation — jump to linked concept, switching stage if needed
+document.getElementById("cat-pane-detail").addEventListener("click", e => {
+  const a = e.target.closest(".cat-edge-link");
+  if (!a) return;
+  const targetId = parseInt(a.dataset.id);
+  const targetConcept = allNodes.find(n => n.id === targetId);
+  if (!targetConcept) return;
+  if (targetConcept.stage !== catStage) {
+    document.querySelector(".cat-stage-btn.active")?.classList.remove("active");
+    const btn = document.querySelector(`.cat-stage-btn[data-stage="${targetConcept.stage}"]`);
+    if (btn) { btn.classList.add("active"); catStage = targetConcept.stage; catLoadStage(catStage); }
+  }
+  const row = document.querySelector(`#cat-tbody tr[data-id="${targetId}"]`);
+  if (row) {
+    if (catActiveRow) catActiveRow.classList.remove("active");
+    catActiveRow = row;
+    row.classList.add("active");
+    row.scrollIntoView({block:"nearest"});
+  }
+  catOpenDetail(targetId);
+});
+
+// View toggle
+document.getElementById("btn-view-graph").addEventListener("click", () => {
+  document.getElementById("cv-wrap").hidden          = false;
+  document.getElementById("graph-controls").hidden   = false;
+  document.getElementById("catalog-view").hidden     = true;
+  document.getElementById("cat-controls").hidden     = true;
+  document.getElementById("btn-view-graph").classList.add("on");
+  document.getElementById("btn-view-catalog").classList.remove("on");
+});
+
+document.getElementById("btn-view-catalog").addEventListener("click", () => {
+  document.getElementById("cv-wrap").hidden          = true;
+  document.getElementById("graph-controls").hidden   = true;
+  document.getElementById("catalog-view").hidden     = false;
+  document.getElementById("cat-controls").hidden     = false;
+  document.getElementById("btn-view-graph").classList.remove("on");
+  document.getElementById("btn-view-catalog").classList.add("on");
+});
+</script>
+</body>
+</html>
