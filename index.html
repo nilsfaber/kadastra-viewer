@@ -21,6 +21,11 @@
     .toggle-btn.on { background:rgba(91,138,255,.2); border-color:var(--accent); color:var(--accent); }
     #cv-wrap { flex:1; position:relative; }
     canvas { display:block; width:100%; height:100%; }
+    #cv2d { position:absolute; inset:0; cursor:grab; }
+    #cv2d.dragging { cursor:grabbing; }
+    #graph-search { background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); padding:4px 10px; font-size:12px; width:200px; }
+    #graph-search:focus { outline:none; border-color:var(--accent); }
+    .view-btn:disabled { opacity:.4; cursor:not-allowed; }
     #tip { position:fixed; pointer-events:none; background:rgba(26,29,39,.92); border:1px solid var(--border); border-radius:5px; padding:4px 8px; font-size:12px; color:var(--text); display:none; white-space:nowrap; z-index:20; }
     #info { position:absolute; top:0; right:0; width:280px; height:100%; background:var(--surface); border-left:1px solid var(--border); padding:14px; overflow-y:auto; font-size:12px; display:none; z-index:10; }
     #info h2 { font-size:14px; margin-bottom:8px; }
@@ -95,7 +100,8 @@
   <div class="controls">
     <div style="margin-left:auto;display:flex;gap:4px">
       <button id="btn-view-catalog" class="view-btn on">Catalog</button>
-      <button id="btn-view-graph" class="view-btn">Graph</button>
+      <button id="btn-view-2d" class="view-btn">2D</button>
+      <button id="btn-view-3d" class="view-btn">3D</button>
     </div>
   </div>
 </header>
@@ -116,7 +122,20 @@
     <button class="toggle-btn on" data-layer="scientific">Scientific</button>
     <button class="toggle-btn on" data-layer="speculative">Speculative</button>
   </div>
+  <div class="toggle-group" title="Edge types">
+    <button class="toggle-btn on" data-edgetype="enables">enables</button>
+    <button class="toggle-btn on" data-edgetype="alternative_to">alternative</button>
+    <button class="toggle-btn on" data-edgetype="related">related</button>
+  </div>
   <button id="btn-fit">Fit</button>
+  <select id="sel-lineage" title="How far to follow prerequisites / dependents of the selected concept">
+    <option value="1">Lineage: 1 step</option>
+    <option value="2" selected>Lineage: 2 steps</option>
+    <option value="3">Lineage: 3 steps</option>
+    <option value="Infinity">Lineage: full</option>
+  </select>
+  <input id="graph-search" list="graph-names" placeholder="Find concept…" autocomplete="off">
+  <datalist id="graph-names"></datalist>
   <span id="status">Loading…</span>
 </div>
 
@@ -136,6 +155,7 @@
 
 <div id="cv-wrap" hidden>
   <canvas id="cv"></canvas>
+  <canvas id="cv2d"></canvas>
   <div id="tip"></div>
   <div id="info">
     <h2 id="info-name"></h2>
@@ -145,6 +165,8 @@
     <div class="kv"><span class="k">Maturity</span><span class="v" id="info-maturity"></span></div>
     <div class="kv"><span class="k">Confidence</span><span class="v" id="info-confidence"></span></div>
     <div class="kv"><span class="k">Connections</span><span class="v" id="info-connections"></span></div>
+    <div class="kv"><span class="k">Importance</span><span class="v" id="info-importance"></span></div>
+    <div class="kv"><span class="k">Lineage</span><span class="v" id="info-lineage"></span></div>
     <p id="info-desc"></p>
   </div>
 </div>
@@ -212,19 +234,30 @@ const DOMAIN_COLORS = {
 };
 
 let allNodes=[], allEdges=[], currentNodes=[], layerVisible={scientific:true,speculative:true}, degreeMap={};
-let selectedId=null, visEdges=[];
+let edgeTypeVisible={enables:true,alternative_to:true,related:true};
+let selectedId=null, visEdges=[], selLineage=null, lineageDepth=2;
 let baseNCol=null, baseNSiz=null;
 let pColAttr=null, pSizAttr=null, lColAttr=null;
 const SEGS=10;
+const EDGE_BASE={enables:0x34406a, alternative_to:0x6e4e2e, related:0x2e323f};
+const UP_COLOR=0xffb86b, DOWN_COLOR=0x7baeff;
 
 // ── Three.js ──────────────────────────────────────────────────────────────────
 const wrap     = document.getElementById("cv-wrap");
 const canvas   = document.getElementById("cv");
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const renderer = (() => {
+  try {
+    const r = new THREE.WebGLRenderer({canvas, antialias:true});
+    r.setPixelRatio(Math.min(devicePixelRatio,2));
+    return r;
+  } catch (err) {
+    console.warn("WebGL unavailable — 3D view disabled", err);
+    return null;
+  }
+})();
 const scene  = new THREE.Scene();
 scene.background = new THREE.Color(0x0f1117);
-scene.fog = new THREE.FogExp2(0x0f1117, 0.00012);
+scene.fog = new THREE.FogExp2(0x0f1117, 0.00002);
 const camera = new THREE.PerspectiveCamera(60,1,1,200000);
 
 let pointsMesh=null, linesMesh=null;
@@ -291,24 +324,30 @@ canvas.addEventListener("click", e=>{
   if(!pointsMesh||!currentNodes.length) return;
   raycaster.setFromCamera(ndcFromEvent(e),camera);
   const hits=raycaster.intersectObject(pointsMesh);
-  const info=document.getElementById("info");
-  if(hits.length){
-    const n=currentNodes[hits[0].index];
-    selectedId=n.id; applySelection();
-    document.getElementById("info-name").textContent      =n.name;
-    document.getElementById("info-stage").textContent     =n.stage;
-    document.getElementById("info-domain").textContent    =n.domain;
-    document.getElementById("info-layer").textContent     =n.layer;
-    document.getElementById("info-maturity").textContent  =n.maturity;
-    document.getElementById("info-confidence").textContent=n.confidence;
-    document.getElementById("info-connections").textContent=degreeMap[n.id]??0;
-    document.getElementById("info-desc").textContent      =n.description??"";
-    info.style.display="block";
-  } else {
-    selectedId=null; applySelection();
-    info.style.display="none";
-  }
+  selectNode(hits.length ? currentNodes[hits[0].index] : null);
 });
+
+function selectNode(n){
+  const info=document.getElementById("info");
+  selectedId = n ? n.id : null;
+  applySelection();
+  if(!n){ info.style.display="none"; return; }
+  document.getElementById("info-name").textContent      =n.name;
+  document.getElementById("info-stage").textContent     =n.stage;
+  document.getElementById("info-domain").textContent    =n.domain;
+  document.getElementById("info-layer").textContent     =n.layer;
+  document.getElementById("info-maturity").textContent  =n.maturity;
+  document.getElementById("info-confidence").textContent=n.confidence;
+  document.getElementById("info-connections").textContent=degreeMap[n.id]??0;
+  document.getElementById("info-importance").textContent = n.weight==null ? "—" :
+    `${Math.round(n.weight*100)}% · ${n.source_count} source(s) · unlocks ${n.reach}${n.is_enabler?" · enabler":""}${n.importance==="major"?" · major":""}`;
+  const full=lineage(n.id), direct=d=>Object.values(d).filter(v=>v===1).length;
+  document.getElementById("info-lineage").textContent=
+    `${direct(full.up)} direct prerequisites (${Object.keys(full.up).length-1} total) · `+
+    `${direct(full.down)} direct dependents (${Object.keys(full.down).length-1} total)`;
+  document.getElementById("info-desc").textContent      =n.description??"";
+  info.style.display="block";
+}
 
 // ── Build geometry ────────────────────────────────────────────────────────────
 function buildGraph(){
@@ -327,7 +366,7 @@ function buildGraph(){
     tmp.set(DOMAIN_COLORS[n.domain]??"#888");
     if(n.layer==="speculative") tmp.lerp(new THREE.Color(0xc77dff),0.35);
     nCol[i*3]=tmp.r; nCol[i*3+1]=tmp.g; nCol[i*3+2]=tmp.b;
-    nSiz[i]=(6+16*Math.sqrt((degreeMap[n.id]??0)/maxDeg))*40;
+    nSiz[i]=(5+20*nodeWeight(n))*40;
   });
   baseNCol=nCol.slice(); baseNSiz=nSiz.slice();
   const pGeo=new THREE.BufferGeometry();
@@ -364,7 +403,7 @@ function buildGraph(){
 
   // Edges — quadratic bezier arcs with per-vertex color for selection highlight
   const nMap={}; currentNodes.forEach(n=>{nMap[n.id]=n;});
-  visEdges=allEdges.filter(e=>ids.has(e.source_id)&&ids.has(e.target_id));
+  visEdges=allEdges.filter(e=>ids.has(e.source_id)&&ids.has(e.target_id)&&edgeTypeVisible[e.type]!==false);
   const vertsPerEdge=SEGS*2;
   const eBuf=new Float32Array(visEdges.length*vertsPerEdge*3);
   const eColBuf=new Float32Array(visEdges.length*vertsPerEdge*3);
@@ -374,9 +413,11 @@ function buildGraph(){
     const s=nMap[e.source_id], t=nMap[e.target_id];
     const ax=s.pos_x??0, ay=s.pos_y??0, az=s.pos_z??0;
     const bx=t.pos_x??0, by=t.pos_y??0, bz=t.pos_z??0;
-    const cx=(ax+bx)/2, cz=(az+bz)/2;
+    const cx=(ax+bx)/2, cy=(ay+by)/2;
     const dist=Math.sqrt((bx-ax)**2+(by-ay)**2+(bz-az)**2);
-    const cy=(ay+by)/2+dist*0.18;
+    // bulge out of the stage/lane plane so arcs don't cut across other tracks in front view
+    const cz=(az+bz)/2+dist*0.15;
+    const base=new THREE.Color(EDGE_BASE[e.type]??0x3a3f5c);
     for(let k=0;k<SEGS;k++){
       const t0=k/SEGS, t1=(k+1)/SEGS, u0=1-t0, u1=1-t1;
       eBuf[ei++]=u0*u0*ax+2*u0*t0*cx+t0*t0*bx;
@@ -385,7 +426,7 @@ function buildGraph(){
       eBuf[ei++]=u1*u1*ax+2*u1*t1*cx+t1*t1*bx;
       eBuf[ei++]=u1*u1*ay+2*u1*t1*cy+t1*t1*by;
       eBuf[ei++]=u1*u1*az+2*u1*t1*cz+t1*t1*bz;
-      for(let v=0;v<2;v++){ eColBuf[ci++]=dimC.r; eColBuf[ci++]=dimC.g; eColBuf[ci++]=dimC.b; }
+      for(let v=0;v<2;v++){ eColBuf[ci++]=base.r; eColBuf[ci++]=base.g; eColBuf[ci++]=base.b; }
     }
   });
   const lGeo=new THREE.BufferGeometry();
@@ -402,69 +443,111 @@ function buildGraph(){
   applySelection();
 }
 
+function lineage(id, maxDepth=Infinity){
+  // upstream = transitive prerequisites, downstream = everything this enables; other edge types 1 hop
+  const fwd={}, back={}, side={};
+  allEdges.forEach(e=>{
+    if(edgeTypeVisible[e.type]===false) return;
+    if(e.type==='enables'){
+      (fwd[e.source_id]||(fwd[e.source_id]=[])).push(e.target_id);
+      (back[e.target_id]||(back[e.target_id]=[])).push(e.source_id);
+    } else if(e.source_id===id) side[e.target_id]=true;
+    else if(e.target_id===id) side[e.source_id]=true;
+  });
+  const walk=(adj)=>{
+    const d={[id]:0}, q=[id];
+    for(let i=0;i<q.length;i++){
+      if(d[q[i]]>=maxDepth) continue;
+      for(const n of adj[q[i]]||[]) if(d[n]===undefined){ d[n]=d[q[i]]+1; q.push(n); }
+    }
+    return d;
+  };
+  return {up:walk(back), down:walk(fwd), side};
+}
+
 function applySelection(){
+  selLineage = selectedId===null ? null : lineage(selectedId, lineageDepth);
+  draw2d();
   if(!pColAttr||!pSizAttr||!lColAttr) return;
   const nC=pColAttr.array, nS=pSizAttr.array, eC=lColAttr.array;
-  const dimC=new THREE.Color(0x3a3f5c);
   const vertsPerEdge=SEGS*2;
+  const setEdge=(j,col)=>{
+    for(let v=0;v<vertsPerEdge;v++){ const k=(j*vertsPerEdge+v)*3; eC[k]=col.r; eC[k+1]=col.g; eC[k+2]=col.b; }
+  };
   if(selectedId===null){
     nC.set(baseNCol); nS.set(baseNSiz);
-    for(let i=0;i<visEdges.length*vertsPerEdge;i++){
-      eC[i*3]=dimC.r; eC[i*3+1]=dimC.g; eC[i*3+2]=dimC.b;
-    }
+    visEdges.forEach((e,j)=>setEdge(j,new THREE.Color(EDGE_BASE[e.type]??0x3a3f5c)));
   } else {
-    // BFS over all edges (undirected) from selectedId, up to MAX_DEPTH hops
-    const MAX_DEPTH=4;
-    const adjAll={};
-    allEdges.forEach(e=>{
-      (adjAll[e.source_id]||(adjAll[e.source_id]=[])).push(e.target_id);
-      (adjAll[e.target_id]||(adjAll[e.target_id]=[])).push(e.source_id);
-    });
-    const dist={[selectedId]:0};
-    const queue=[selectedId];
-    for(let qi=0;qi<queue.length;qi++){
-      const cur=queue[qi];
-      if(dist[cur]>=MAX_DEPTH) continue;
-      (adjAll[cur]||[]).forEach(nb=>{
-        if(dist[nb]===undefined){ dist[nb]=dist[cur]+1; queue.push(nb); }
-      });
-    }
-    // brightness / size drop-off per hop: d=0→1.0, d=1→0.85, d=2→0.55, d=3→0.30, d=4→0.15, beyond→0.06
-    const brightScale=[1.0, 0.85, 0.55, 0.30, 0.15];
-    const sizeScale  =[1.6, 1.0,  0.8,  0.65, 0.55];
-    const DIM=0.06;
+    const {up,down,side}=selLineage;
+    const upC=new THREE.Color(UP_COLOR), downC=new THREE.Color(DOWN_COLOR), tmp=new THREE.Color();
+    const DIM=0.07;
     currentNodes.forEach((n,i)=>{
-      const d=dist[n.id];
-      if(d===undefined){
+      let col=null, size=baseNSiz[i];
+      if(n.id===selectedId){ col=new THREE.Color(1,1,1); size*=1.7; }
+      else if(up[n.id]!==undefined){ col=tmp.copy(upC).multiplyScalar(Math.max(0.5,1-0.12*(up[n.id]-1))); size*=1.15; }
+      else if(down[n.id]!==undefined){ col=tmp.copy(downC).multiplyScalar(Math.max(0.5,1-0.12*(down[n.id]-1))); size*=1.15; }
+      else if(side[n.id]){ col=tmp.setRGB(baseNCol[i*3],baseNCol[i*3+1],baseNCol[i*3+2]); }
+      if(col){ nC[i*3]=col.r; nC[i*3+1]=col.g; nC[i*3+2]=col.b; nS[i]=size; }
+      else {
         nC[i*3]=baseNCol[i*3]*DIM; nC[i*3+1]=baseNCol[i*3+1]*DIM; nC[i*3+2]=baseNCol[i*3+2]*DIM;
-        nS[i]=baseNSiz[i]*0.4;
-      } else if(d===0){
-        nC[i*3]=1; nC[i*3+1]=1; nC[i*3+2]=1; nS[i]=baseNSiz[i]*sizeScale[0];
-      } else {
-        const sc=brightScale[d]??DIM;
-        nC[i*3]=baseNCol[i*3]*sc; nC[i*3+1]=baseNCol[i*3+1]*sc; nC[i*3+2]=baseNCol[i*3+2]*sc;
-        nS[i]=baseNSiz[i]*(sizeScale[d]??0.4);
+        nS[i]=baseNSiz[i]*0.5;
       }
     });
-    // Edge highlight: colour by the closer endpoint's distance
-    // d=1 edges → bright blue, d=2 → mid, d=3+ → progressively dimmer
-    const edgeHues=[
-      new THREE.Color(0x7baeff), // d=1
-      new THREE.Color(0x4a6faa), // d=2
-      new THREE.Color(0x334d77), // d=3
-      new THREE.Color(0x243655), // d=4
-    ];
+    const faint=new THREE.Color(0x15182a);
     visEdges.forEach((e,j)=>{
-      const ds=dist[e.source_id]??Infinity, dt=dist[e.target_id]??Infinity;
-      const edgeDist=Math.min(ds,dt);
-      const col=edgeDist<edgeHues.length ? edgeHues[edgeDist] : dimC;
-      const base=j*vertsPerEdge;
-      for(let v=0;v<vertsPerEdge;v++){
-        eC[(base+v)*3]=col.r; eC[(base+v)*3+1]=col.g; eC[(base+v)*3+2]=col.b;
-      }
+      const s=e.source_id, t=e.target_id;
+      if(e.type==='enables' && up[s]!==undefined && up[t]!==undefined) setEdge(j,upC);
+      else if(e.type==='enables' && down[s]!==undefined && down[t]!==undefined) setEdge(j,downC);
+      else if(e.type!=='enables' && (s===selectedId||t===selectedId)) setEdge(j,new THREE.Color(EDGE_BASE[e.type]).multiplyScalar(2.5));
+      else setEdge(j,faint);
     });
   }
   pColAttr.needsUpdate=true; pSizAttr.needsUpdate=true; lColAttr.needsUpdate=true;
+}
+
+// ── Track guides: stage columns, domain lanes, labels ─────────────────────────────────────
+function textSprite(text, color, px, anchorX){
+  const c=document.createElement("canvas"), ctx=c.getContext("2d");
+  const font=`600 ${px}px system-ui, sans-serif`;
+  ctx.font=font;
+  const w=Math.ceil(ctx.measureText(text).width)+16, h=px+16;
+  c.width=w; c.height=h;
+  ctx.font=font; ctx.fillStyle=color; ctx.textBaseline="middle"; ctx.fillText(text,8,h/2);
+  const tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false,fog:false}));
+  s.center.set(anchorX,0.5);
+  s.scale.set(w*4,h*4,1);
+  return s;
+}
+
+function buildGuides(layout){
+  if(!layout) return;
+  const g=new THREE.Group();
+  const {columns,lanes}=layout;
+  const xMin=columns[0].x0, xMax=columns[columns.length-1].x1;
+  const yTop=lanes[0].y0, yBot=lanes[lanes.length-1].y1;
+  lanes.forEach((l,i)=>{
+    const h=l.y0-l.y1;
+    const band=new THREE.Mesh(new THREE.PlaneGeometry(xMax-xMin,h),
+      new THREE.MeshBasicMaterial({color:i%2?0x12151f:0x161a26,depthWrite:false}));
+    band.position.set((xMin+xMax)/2,(l.y0+l.y1)/2,-600);
+    g.add(band);
+    const lbl=textSprite(l.domain,DOMAIN_COLORS[l.domain]??"#aaa",44,1);
+    lbl.position.set(xMin-80,(l.y0+l.y1)/2,0);
+    g.add(lbl);
+  });
+  const pts=[];
+  columns.forEach(c=>{ pts.push(c.x0,yTop,-590, c.x0,yBot,-590); });
+  pts.push(xMax,yTop,-590, xMax,yBot,-590);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));
+  g.add(new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0x2c3148})));
+  columns.forEach(c=>{
+    const lbl=textSprite(`${c.stage} · ${c.label}`,"#c9d1e6",52,0.5);
+    lbl.position.set((c.x0+c.x1)/2,yTop+220,0);
+    g.add(lbl);
+  });
+  scene.add(g);
 }
 
 function fitCamera(){
@@ -476,18 +559,231 @@ function fitCamera(){
     z0=Math.min(z0,n.pos_z??0); z1=Math.max(z1,n.pos_z??0);
   }
   const cx=(x0+x1)/2, cy=(y0+y1)/2, cz=(z0+z1)/2;
-  const diag=Math.sqrt((x1-x0)**2+(y1-y0)**2+(z1-z0)**2);
+  // front-on view of the stage × lane plane; orbit to see the layer sheets
+  const vTan=Math.tan(camera.fov*Math.PI/360);
+  const dist=Math.max((x1-x0+1200)/2/(vTan*camera.aspect), (y1-y0+600)/2/vTan)*1.05+(z1-z0);
   controls.target.set(cx,cy,cz);
-  camera.position.set(cx, cy+diag*0.25, cz+diag*0.65);
+  camera.position.set(cx, cy, cz+dist);
   controls.update();
 }
+
+// ── 2D view (Canvas 2D: stage columns × domain lanes, pan/zoom) ──────────────────
+const cv2=document.getElementById("cv2d"), ctx2=cv2.getContext("2d");
+let graphMode="2d", graphLayout=null, maxDegree=1, drawQueued=false, nodeById={};
+const view2={cx:0, cy:0, k:0.05, ky:0.05};  // world centre (x, flipped y); pixels per world unit horizontally / vertically
+const LABEL_W=120, HEADER_H=28;
+const hex=n=>"#"+n.toString(16).padStart(6,"0");
+const toScreen=(x,y)=>[(x-view2.cx)*view2.k+cv2.clientWidth/2, (-y-view2.cy)*view2.ky+cv2.clientHeight/2];
+
+function resize2d(){
+  const dpr=Math.min(devicePixelRatio,2);
+  cv2.width=Math.round(cv2.clientWidth*dpr); cv2.height=Math.round(cv2.clientHeight*dpr);
+  ctx2.setTransform(dpr,0,0,dpr,0,0);
+  draw2d();
+}
+function draw2d(){
+  if(graphMode!=="2d"||drawQueued) return;
+  drawQueued=true;
+  requestAnimationFrame(()=>{ drawQueued=false; paint2d(); });
+}
+function nodeWeight(n){
+  return n.weight ?? Math.sqrt((degreeMap[n.id]??0)/maxDegree);
+}
+function nodeRadius2d(n){
+  return Math.min(8,Math.max(2,16*Math.min(view2.k,view2.ky)))*(0.45+2.2*nodeWeight(n)**1.5);
+}
+
+function paint2d(){
+  const W=cv2.clientWidth, H=cv2.clientHeight, k=view2.k;
+  if(!W||!H) return;
+  ctx2.textBaseline="middle";
+  ctx2.fillStyle="#0f1117"; ctx2.fillRect(0,0,W,H);
+  const lanes=graphLayout?.lanes??[], columns=graphLayout?.columns??[];
+  if(lanes.length){
+    const [xa]=toScreen(columns[0].x0,0), [xb]=toScreen(columns.at(-1).x1,0);
+    lanes.forEach((l,i)=>{
+      const [,ya]=toScreen(0,l.y0), [,yb]=toScreen(0,l.y1);
+      ctx2.fillStyle=i%2?"#12151f":"#161a26"; ctx2.fillRect(xa,ya,xb-xa,yb-ya);
+    });
+    const [,yt]=toScreen(0,lanes[0].y0), [,yb]=toScreen(0,lanes.at(-1).y1);
+    ctx2.strokeStyle="#2c3148"; ctx2.lineWidth=1; ctx2.beginPath();
+    [...columns.map(c=>c.x0), columns.at(-1).x1].forEach(x=>{
+      const [sx]=toScreen(x,0); ctx2.moveTo(sx,yt); ctx2.lineTo(sx,yb);
+    });
+    ctx2.stroke();
+  }
+
+  const pos={}; currentNodes.forEach(n=>{ pos[n.id]=toScreen(n.pos_x??0,n.pos_y??0); });
+  const lin=selLineage, inLin=id=>lin&&(id===selectedId||lin.up[id]!==undefined||lin.down[id]!==undefined||lin.side[id]);
+  const baseAlpha=Math.min(0.55,Math.max(0.1,120/Math.max(visEdges.length,1)));
+  const edgeStyle=e=>{
+    if(!lin) return {c:hex(EDGE_BASE[e.type]??0x3a3f5c), a:baseAlpha, w:1, hot:false};
+    const s=e.source_id, t=e.target_id;
+    if(e.type==="enables"&&lin.up[s]!==undefined&&lin.up[t]!==undefined) return {c:hex(UP_COLOR),a:0.95,w:1.8,hot:true};
+    if(e.type==="enables"&&lin.down[s]!==undefined&&lin.down[t]!==undefined) return {c:hex(DOWN_COLOR),a:0.95,w:1.8,hot:true};
+    if(e.type!=="enables"&&(s===selectedId||t===selectedId)) return {c:e.type==="related"?"#9aa3bf":"#f4a261",a:0.9,w:1.5,hot:true};
+    return {c:"#2a2f45",a:0.12,w:1,hot:false};
+  };
+  const drawEdge=(e,st)=>{
+    const a=pos[e.source_id], b=pos[e.target_id];
+    if(!a||!b) return;
+    const dx=(b[0]-a[0])*0.5;
+    ctx2.globalAlpha=st.a; ctx2.strokeStyle=st.c; ctx2.lineWidth=st.w;
+    ctx2.beginPath(); ctx2.moveTo(a[0],a[1]); ctx2.bezierCurveTo(a[0]+dx,a[1],b[0]-dx,b[1],b[0],b[1]); ctx2.stroke();
+    if(st.hot||k>0.2){
+      // arrowhead along the curve's end tangent (b minus second control point)
+      let tx=dx, ty=0; if(Math.abs(dx)<1){ tx=b[0]-a[0]; ty=b[1]-a[1]; }
+      const len=Math.hypot(tx,ty)||1, ux=tx/len, uy=ty/len, r=nodeRadius2d(nodeById[e.target_id])+1, s=4+st.w*1.5;
+      const px=b[0]-ux*r, py=b[1]-uy*r;
+      ctx2.fillStyle=st.c; ctx2.beginPath();
+      ctx2.moveTo(px,py); ctx2.lineTo(px-ux*s-uy*s*0.6,py-uy*s+ux*s*0.6); ctx2.lineTo(px-ux*s+uy*s*0.6,py-uy*s-ux*s*0.6);
+      ctx2.fill();
+    }
+  };
+  const hot=[];
+  visEdges.forEach(e=>{ const st=edgeStyle(e); if(st.hot) hot.push([e,st]); else drawEdge(e,st); });
+  hot.forEach(([e,st])=>drawEdge(e,st));
+  ctx2.globalAlpha=1;
+
+  const showAll=55*view2.ky>=13&&view2.k>=0.12, showLin=view2.ky>=0.06;
+  const labels=[];
+  currentNodes.forEach(n=>{
+    const [x,y]=pos[n.id];
+    if(x<-20||y<-20||x>W+20||y>H+20) return;
+    const r=nodeRadius2d(n), on=!lin||inLin(n.id);
+    ctx2.globalAlpha=on?1:0.12;
+    ctx2.fillStyle=DOMAIN_COLORS[n.domain]??"#888";
+    ctx2.beginPath();
+    if(n.layer==="speculative"){ ctx2.moveTo(x,y-r*1.25); ctx2.lineTo(x+r*1.25,y); ctx2.lineTo(x,y+r*1.25); ctx2.lineTo(x-r*1.25,y); ctx2.closePath(); }
+    else ctx2.arc(x,y,r,0,Math.PI*2);
+    ctx2.fill();
+    if(lin&&on){
+      const ring=n.id===selectedId?"#ffffff":lin.up[n.id]!==undefined?hex(UP_COLOR):lin.down[n.id]!==undefined?hex(DOWN_COLOR):null;
+      if(ring){ ctx2.strokeStyle=ring; ctx2.lineWidth=n.id===selectedId?2.5:1.5; ctx2.beginPath(); ctx2.arc(x,y,r+3,0,Math.PI*2); ctx2.stroke(); }
+    }
+    if(n.id===selectedId||(showAll&&on)||(lin&&on&&showLin)||(!lin&&nodeWeight(n)>=0.75)){
+      const dist=n.id===selectedId?-1:lin?Math.min(lin.up[n.id]??99,lin.down[n.id]??99,lin.side[n.id]?1:99):99;
+      labels.push({n,x:x+r+5,y,prio:dist*1000-nodeWeight(n)*100});
+    }
+  });
+  ctx2.globalAlpha=1;
+
+  // greedy label placement: highest priority first, skip any label that would overlap one already drawn
+  ctx2.font="11px system-ui, sans-serif"; ctx2.lineJoin="round";
+  const boxes=[];
+  labels.sort((a,b)=>a.prio-b.prio).forEach(({n,x,y})=>{
+    const text=n.name.length>34?n.name.slice(0,33)+"…":n.name;
+    const w=ctx2.measureText(text).width, h=13;
+    if(boxes.some(b=>x<b.x+b.w+4&&x+w+4>b.x&&y-h/2<b.y+b.h&&y+h/2>b.y)) return;
+    boxes.push({x,y:y-h/2,w,h});
+    ctx2.strokeStyle="#0f1117"; ctx2.lineWidth=3; ctx2.strokeText(text,x,y);
+    ctx2.fillStyle=n.id===selectedId?"#ffffff":"#c9d1e6"; ctx2.fillText(text,x,y);
+  });
+
+  // sticky headers: stage names on top, domain lanes on the left
+  if(lanes.length){
+    ctx2.fillStyle="rgba(15,17,23,0.9)"; ctx2.fillRect(0,0,W,HEADER_H); ctx2.fillRect(0,HEADER_H,LABEL_W,H-HEADER_H);
+    ctx2.font="600 12px system-ui, sans-serif"; ctx2.textAlign="center";
+    columns.forEach(c=>{
+      const [xa]=toScreen(c.x0,0), [xb]=toScreen(c.x1,0);
+      if(xb<LABEL_W||xa>W) return;
+      const text=xb-xa>220?`${c.stage} · ${c.label}`:c.stage;
+      ctx2.fillStyle="#c9d1e6";
+      ctx2.fillText(text,Math.min(Math.max((xa+xb)/2,LABEL_W+60),W-60),HEADER_H/2);
+    });
+    ctx2.textAlign="right";
+    lanes.forEach(l=>{
+      const [,ya]=toScreen(0,l.y0), [,yb]=toScreen(0,l.y1);
+      if(yb<HEADER_H||ya>H||yb-ya<12) return;
+      const y=Math.min(Math.max((ya+yb)/2,Math.max(ya,HEADER_H)+10),Math.min(yb,H)-8);
+      ctx2.fillStyle=DOMAIN_COLORS[l.domain]??"#aaa";
+      ctx2.fillText(l.domain,LABEL_W-10,y);
+    });
+    ctx2.textAlign="left";
+  }
+}
+
+function nodeAt2d(mx,my){
+  let best=null, bd=Infinity;
+  currentNodes.forEach(n=>{
+    const [x,y]=toScreen(n.pos_x??0,n.pos_y??0), d=Math.hypot(x-mx,y-my);
+    if(d<nodeRadius2d(n)+5&&d<bd){ best=n; bd=d; }
+  });
+  return best;
+}
+
+function fit2d(){
+  if(!currentNodes.length) return;
+  let x0=Infinity,x1=-Infinity;
+  currentNodes.forEach(n=>{ x0=Math.min(x0,n.pos_x); x1=Math.max(x1,n.pos_x); });
+  // vertical extent = full lane stack, so every track stays visible
+  const lanes=graphLayout?.lanes;
+  const y0=lanes?-lanes[0].y0:Math.min(...currentNodes.map(n=>-n.pos_y));
+  const y1=lanes?-lanes.at(-1).y1:Math.max(...currentNodes.map(n=>-n.pos_y));
+  const W=cv2.clientWidth-LABEL_W-60, H=cv2.clientHeight-HEADER_H-16;
+  view2.k=Math.min(W/Math.max(x1-x0,1), 1);
+  view2.ky=Math.min(H/Math.max(y1-y0,1), view2.k*6, 1);
+  view2.cx=(x0+x1)/2-(LABEL_W-20)/2/view2.k;
+  view2.cy=(y0+y1)/2-(HEADER_H-8)/2/view2.ky;
+  draw2d();
+}
+
+let drag2=null;
+cv2.addEventListener("mousedown",e=>{ drag2={x:e.clientX,y:e.clientY,cx:view2.cx,cy:view2.cy,moved:false}; });
+window.addEventListener("mousemove",e=>{
+  if(!drag2) return;
+  const dx=e.clientX-drag2.x, dy=e.clientY-drag2.y;
+  if(Math.abs(dx)+Math.abs(dy)>3){ drag2.moved=true; cv2.classList.add("dragging"); }
+  view2.cx=drag2.cx-dx/view2.k; view2.cy=drag2.cy-dy/view2.ky;
+  tip.style.display="none";
+  draw2d();
+});
+window.addEventListener("mouseup",e=>{
+  if(drag2&&!drag2.moved&&e.target===cv2){
+    const r=cv2.getBoundingClientRect();
+    selectNode(nodeAt2d(e.clientX-r.left,e.clientY-r.top));
+  }
+  drag2=null; cv2.classList.remove("dragging");
+});
+cv2.addEventListener("mousemove",e=>{
+  if(drag2) return;
+  const r=cv2.getBoundingClientRect(), n=nodeAt2d(e.clientX-r.left,e.clientY-r.top);
+  if(n){
+    tip.textContent=`${n.name} · ${n.stage} · ${n.domain}${n.layer==="speculative"?" · speculative":""}`;
+    tip.style.display="block"; tip.style.left=(e.clientX+12)+"px"; tip.style.top=(e.clientY-6)+"px";
+    cv2.style.cursor="pointer";
+  } else { tip.style.display="none"; cv2.style.cursor=""; }
+});
+cv2.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=cv2.getBoundingClientRect(), mx=e.clientX-r.left-cv2.clientWidth/2, my=e.clientY-r.top-cv2.clientHeight/2;
+  const wx=mx/view2.k+view2.cx, wy=my/view2.ky+view2.cy;
+  // shift+wheel zooms only the stage axis, alt+wheel only the lanes
+  const f=Math.exp(-(e.deltaY||e.deltaX)*((e.ctrlKey||e.metaKey)?0.01:0.0015));
+  if(!e.altKey) view2.k=Math.min(3,Math.max(0.003,view2.k*f));
+  if(!e.shiftKey) view2.ky=Math.min(3,Math.max(0.003,view2.ky*f));
+  view2.cx=wx-mx/view2.k; view2.cy=wy-my/view2.ky;
+  draw2d();
+},{passive:false});
+
+function fitCurrent(){ graphMode==="2d" ? fit2d() : fitCamera(); }
+
+document.getElementById("graph-search").addEventListener("change",e=>{
+  const q=e.target.value.trim().toLowerCase();
+  const n=currentNodes.find(c=>c.name.toLowerCase()===q)||currentNodes.find(c=>c.name.toLowerCase().includes(q));
+  if(!n) return;
+  selectNode(n);
+  if(graphMode==="2d"){ view2.k=Math.max(view2.k,0.3); view2.ky=Math.max(view2.ky,0.3); view2.cx=n.pos_x; view2.cy=-n.pos_y; draw2d(); }
+  else { controls.target.set(n.pos_x,n.pos_y,n.pos_z); controls.update(); }
+});
 
 // ── Resize ────────────────────────────────────────────────────────────────────
 function resize(){
   const W=wrap.clientWidth, H=wrap.clientHeight;
   if(!W||!H) return;
-  renderer.setSize(W,H,false);
+  if(renderer) renderer.setSize(W,H,false);
   camera.aspect=W/H; camera.updateProjectionMatrix();
+  resize2d();
 }
 window.addEventListener("resize",resize);
 if(typeof ResizeObserver !== "undefined") {
@@ -497,25 +793,43 @@ if(typeof ResizeObserver !== "undefined") {
 resize();
 
 // ── Render loop ───────────────────────────────────────────────────────────────
-(function render(){ requestAnimationFrame(render); controls.update(); renderer.render(scene,camera); })();
+(function render(){
+  requestAnimationFrame(render);
+  if(!renderer||graphMode!=="3d") return;
+  controls.update(); renderer.render(scene,camera);
+})();
 
-// ── Controls ──────────────────────────────────────────────────────────────────
-document.getElementById("sel-stage").addEventListener("change",()=>{buildGraph();fitCamera();});
-document.getElementById("btn-fit").addEventListener("click",fitCamera);
-document.querySelectorAll(".toggle-btn").forEach(btn=>{
+// ── Controls ────────────────────────────────────────────────────────────────────────────────
+document.getElementById("sel-stage").addEventListener("change",()=>{buildGraph();fitCurrent();});
+document.getElementById("btn-fit").addEventListener("click",fitCurrent);
+document.getElementById("sel-lineage").addEventListener("change",e=>{
+  lineageDepth=Number(e.target.value); applySelection();
+});
+document.querySelectorAll(".toggle-btn[data-layer]").forEach(btn=>{
   btn.addEventListener("click",()=>{
     const l=btn.dataset.layer; layerVisible[l]=!layerVisible[l];
     btn.classList.toggle("on",layerVisible[l]); buildGraph();
   });
 });
+document.querySelectorAll(".toggle-btn[data-edgetype]").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    const t=btn.dataset.edgetype; edgeTypeVisible[t]=!edgeTypeVisible[t];
+    btn.classList.toggle("on",edgeTypeVisible[t]); buildGraph();
+  });
+});
 
 // ── Load ──────────────────────────────────────────────────────────────────────
 fetch("data/concept_graph.json").then(r=>r.json()).then(data=>{
-  allNodes=data.concepts; allEdges=data.edges;
+  allNodes=data.concepts; allEdges=data.edges; graphLayout=data.layout??null;
   data.edges.forEach(e=>{
     degreeMap[e.source_id]=(degreeMap[e.source_id]??0)+1;
     degreeMap[e.target_id]=(degreeMap[e.target_id]??0)+1;
   });
+  maxDegree=Math.max(1,...Object.values(degreeMap));
+  nodeById=Object.fromEntries(allNodes.map(n=>[n.id,n]));
+  document.getElementById("graph-names").innerHTML=
+    [...new Set(allNodes.map(n=>n.name))].sort().map(n=>`<option value="${n.replace(/"/g,"&quot;")}">`).join("");
+  buildGuides(data.layout);
   buildGraph(); fitCamera();
   buildEdgeIndex();
   // default to catalog: select first stage
@@ -686,25 +1000,33 @@ document.getElementById("cat-pane-detail").addEventListener("click", e => {
   catOpenDetail(targetId);
 });
 
-// View toggle
-document.getElementById("btn-view-graph").addEventListener("click", () => {
-  document.getElementById("cv-wrap").hidden          = false;
-  document.getElementById("graph-controls").hidden   = false;
-  document.getElementById("catalog-view").hidden     = true;
-  document.getElementById("cat-controls").hidden     = true;
-  document.getElementById("btn-view-graph").classList.add("on");
-  document.getElementById("btn-view-catalog").classList.remove("on");
-  requestAnimationFrame(resize);
-});
-
-document.getElementById("btn-view-catalog").addEventListener("click", () => {
-  document.getElementById("cv-wrap").hidden          = true;
-  document.getElementById("graph-controls").hidden   = true;
-  document.getElementById("catalog-view").hidden     = false;
-  document.getElementById("cat-controls").hidden     = false;
-  document.getElementById("btn-view-graph").classList.remove("on");
-  document.getElementById("btn-view-catalog").classList.add("on");
-});
+// View toggle: catalog | 2d | 3d
+const fitted={};
+function showView(mode){
+  const graph=mode!=="catalog";
+  document.getElementById("cv-wrap").hidden        = !graph;
+  document.getElementById("graph-controls").hidden  = !graph;
+  document.getElementById("catalog-view").hidden    = graph;
+  document.getElementById("cat-controls").hidden    = graph;
+  ["catalog","2d","3d"].forEach(m=>document.getElementById(`btn-view-${m}`).classList.toggle("on",m===mode));
+  if(!graph) return;
+  graphMode=mode;
+  canvas.style.display = mode==="3d"?"block":"none";
+  cv2.style.display    = mode==="2d"?"block":"none";
+  tip.style.display="none";
+  requestAnimationFrame(()=>{
+    resize();
+    if(!fitted[mode]){ fitted[mode]=true; fitCurrent(); }
+    draw2d();
+  });
+}
+document.getElementById("btn-view-catalog").addEventListener("click",()=>showView("catalog"));
+document.getElementById("btn-view-2d").addEventListener("click",()=>showView("2d"));
+document.getElementById("btn-view-3d").addEventListener("click",()=>showView("3d"));
+if(!renderer){
+  const b=document.getElementById("btn-view-3d");
+  b.disabled=true; b.title="WebGL is not available in this browser";
+}
 </script>
 </body>
 </html>

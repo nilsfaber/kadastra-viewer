@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "kadastra-static-v2";
+const STATIC_CACHE = "kadastra-static-v6";
 const DATA_CACHE   = "kadastra-data-v1";
 const STATIC_URLS  = [
   "./",
@@ -35,10 +35,23 @@ self.addEventListener("fetch", e => {
   const {pathname} = new URL(e.request.url);
   if (pathname.endsWith("concept_graph.json")) {
     e.respondWith(etagFetch(e.request));
+  } else if (e.request.mode === "navigate" || pathname.endsWith("/") || pathname.endsWith(".html")) {
+    e.respondWith(networkFirst(e.request));
   } else {
     e.respondWith(cacheFirst(e.request));
   }
 });
+
+// Network-first for the page itself so viewer edits show up; cached copy when offline.
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request, {cache: "no-cache"});
+    if (response.ok) (await caches.open(STATIC_CACHE)).put(request, response.clone());
+    return response;
+  } catch (_) {
+    return (await caches.match(request)) ?? Response.error();
+  }
+}
 
 // Cache-first: serve from cache, fall back to network and cache the result.
 async function cacheFirst(request) {
