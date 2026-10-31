@@ -1,10 +1,13 @@
 "use strict";
 
-const STATIC_CACHE = "kadastra-static-v6";
+const STATIC_CACHE = "kadastra-static-v15";
 const DATA_CACHE   = "kadastra-data-v1";
 const STATIC_URLS  = [
   "./",
   "./lib/three.min.js",
+  "./lib/techtree.js",
+  "./lib/base.css",
+  "./lib/fonts/Antonio.woff2",
 ];
 const DATA_URL = "./data/concept_graph.json";
 
