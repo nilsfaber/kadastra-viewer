@@ -200,7 +200,7 @@ button, input, select, textarea { font-family: inherit; }
 /* ── App body: sidebar + main ── */
 /* the sidebar arm joins the elbow directly; the main column keeps the gap */
 .app-body { flex: 1; display: flex; gap: var(--pad); min-height: 0; margin-top: calc(var(--pad) * -1); }
-.app-main { flex: 1; display: flex; flex-direction: column; gap: var(--pad); min-width: 0; padding-top: var(--pad); }
+.app-main { flex: 1; display: flex; flex-direction: column; gap: var(--pad); min-width: 0; min-height: 0; padding-top: var(--pad); }
 
 .sidebar {
   width: var(--side-w); flex-shrink: 0; overflow-y: auto; padding: var(--pad) var(--u) var(--pad) calc(var(--arm) + var(--pad));
