@@ -8,20 +8,22 @@
   <script src="lib/three.min.js"></script>
   <script src="lib/OrbitControls.js"></script>
   <script src="lib/techtree.js"></script>
-  <link rel="stylesheet" href="lib/base.css">
+  <script src="lib/roadmap.js"></script>
+  <link rel="stylesheet" href="lib/lcars.css">
   <style>
     /* viewer-only styles; shared look lives in lib/base.css */
     #cv-wrap { flex:1; position:relative; }
     canvas { display:block; width:100%; height:100%; }
     #cv2d { position:absolute; inset:0; cursor:grab; }
     #cv2d.dragging { cursor:grabbing; }
-    #graph-controls button { height:28px; padding:0 14px 2px; border:none; border-radius:14px; background:var(--lc-violet); color:#000; font-size:14px; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; }
+    #graph-controls button { height:var(--row); padding:0 calc(var(--u)*3.5); border:none; border-radius:var(--r-row); background:var(--lc-violet); color:#000; font-size:var(--fs-s); text-transform:uppercase; letter-spacing:.06em; cursor:pointer; }
     #graph-controls button:hover { filter:brightness(1.18); }
     .toggle-group { display:flex; gap:4px; }
     #graph-controls .toggle-btn { font-weight:500; background:var(--elevated); color:var(--muted); }
     #graph-controls .toggle-btn.on { background:var(--lc-gold); color:#000; }
-    #tip { position:fixed; pointer-events:none; background:#000; border-radius:12px; box-shadow:inset 6px 0 0 var(--lc-gold); padding:4px 10px 4px 14px; font-size:14px; color:var(--text); display:none; white-space:nowrap; z-index:20; }
-    #info { position:absolute; top:0; right:0; width:300px; height:100%; background:#000; border-left:10px solid var(--lc-lilac); border-radius:24px 0 0 24px; padding:16px; overflow-y:auto; font-size:14px; display:none; z-index:10; }
+    #tip { position:fixed; pointer-events:none; background:#000; border:2px solid var(--lc-gold); border-radius:var(--r-row); padding:var(--u) calc(var(--u)*3); font-size:var(--fs-s); color:var(--text); display:none; white-space:nowrap; z-index:20; }
+    #info { position:absolute; top:var(--pad); right:var(--pad); bottom:var(--pad); width:300px; background:var(--panel); border:2px solid var(--lc-lilac); border-radius:var(--r-panel); padding:var(--pad) calc(var(--pad)*1.5); overflow-y:auto; font-size:var(--fs-s); display:none; z-index:10; }
+    #cv-wrap { border-radius:var(--r-panel); overflow:hidden; background:#000; }
     #info h2 { font-size:24px; color:var(--lc-orange); text-transform:uppercase; letter-spacing:.05em; line-height:1.1; margin-bottom:10px; }
     #info .kv { display:flex; gap:6px; margin-bottom:4px; }
     #info .k { color:var(--lc-sky); min-width:90px; text-transform:uppercase; letter-spacing:.06em; font-size:12px; }
@@ -41,18 +43,19 @@
 <body>
 <header class="app-header">
   <h1>Kadastra</h1>
-  <span class="view-toggle" role="tablist">
-    <button id="btn-view-catalog" class="view-btn on" role="tab">Catalog</button>
-    <button id="btn-view-item" class="view-btn" role="tab" disabled title="Open a concept first">Item</button>
-    <button id="btn-view-2d" class="view-btn" role="tab">2D</button>
-    <button id="btn-view-3d" class="view-btn" role="tab">3D</button>
+  <span class="view-toggle segmented" role="radiogroup" aria-label="Presentation">
+    <button id="btn-view-map" class="view-btn on" role="radio" title="Roadmap"><svg class="icon"><use href="lib/icons.svg#i-grid"/></svg>Map</button>
+    <button id="btn-view-catalog" class="view-btn" role="radio" title="List"><svg class="icon"><use href="lib/icons.svg#i-list"/></svg>List</button>
+    <button id="btn-view-2d" class="view-btn" role="radio" title="2D graph"><svg class="icon"><use href="lib/icons.svg#i-graph"/></svg>2D</button>
+    <button id="btn-view-3d" class="view-btn" role="radio" title="3D graph"><svg class="icon"><use href="lib/icons.svg#i-cube"/></svg>3D</button>
   </span>
 </header>
 
 <div class="app-body">
 <nav class="sidebar" id="sidebar" aria-label="Civilisation stages">
   <div class="sidebar-title">Civilisation stages</div>
-  <div class="stage-nav" id="cat-stage-nav">
+  <div class="stage-nav" id="cat-stage-nav" title="Click: one stage · Shift-click: range · Ctrl/Cmd-click: add or remove">
+    <button class="stage-btn stage-all" data-stage="all"><span class="stage-label">All stages</span><span class="stage-code">K0 → K2</span><span class="stage-count" data-count="all"></span></button>
     <button class="stage-btn active" data-stage="K0_EARTH"><span class="stage-label">Terrestrial</span><span class="stage-code">K0_EARTH</span><span class="stage-count" data-count="K0_EARTH"></span></button>
     <button class="stage-btn" data-stage="K0_ORBIT"><span class="stage-label">Orbital</span><span class="stage-code">K0_ORBIT</span><span class="stage-count" data-count="K0_ORBIT"></span></button>
     <button class="stage-btn" data-stage="K0_LUNAR"><span class="stage-label">Lunar</span><span class="stage-code">K0_LUNAR</span><span class="stage-count" data-count="K0_LUNAR"></span></button>
@@ -104,7 +107,7 @@
 </div>
 
 <div class="nav-bar" id="item-nav" hidden>
-  <button class="back-btn" id="btn-back" title="Back (Esc)"><span class="chev">‹</span><span class="back-label" id="back-label">Back</span></button>
+  <button class="back-btn" id="btn-back" title="Back (Esc)"><svg class="icon"><use href="lib/icons.svg#i-back"/></svg><span class="back-label" id="back-label">Back</span></button>
   <span class="crumbs" id="crumbs"></span>
   <span class="nav-hint"><kbd>Esc</kbd> back · scroll to zoom · drag to pan</span>
 </div>
@@ -115,7 +118,7 @@
   <div id="tip"></div>
   <div id="info">
     <h2 id="info-name"></h2>
-    <button id="btn-open-item" class="btn-secondary">Open item →</button>
+    <button id="btn-open-item" class="btn-secondary">Open<svg class="icon"><use href="lib/icons.svg#i-forward"/></svg></button>
     <div class="kv"><span class="k">Stage</span><span class="v" id="info-stage"></span></div>
     <div class="kv"><span class="k">Domain</span><span class="v" id="info-domain"></span></div>
     <div class="kv"><span class="k">Layer</span><span class="v" id="info-layer"></span></div>
@@ -134,6 +137,7 @@
         <thead>
           <tr>
             <th data-sort="name">Name<span class="sort-arrow"></span></th>
+            <th data-sort="stage" class="col-stage">Stage<span class="sort-arrow"></span></th>
             <th data-sort="domain">Domain<span class="sort-arrow"></span></th>
             <th data-sort="layer">Layer<span class="sort-arrow"></span></th>
             <th data-sort="maturity">Maturity<span class="sort-arrow"></span></th>
@@ -143,11 +147,13 @@
           </tr>
         </thead>
         <tbody id="cat-tbody">
-          <tr><td colspan="7" class="empty">Select a stage above.</td></tr>
+          <tr><td colspan="8" class="empty">Select a stage in the sidebar.</td></tr>
         </tbody>
       </table>
     </section>
 </div>
+
+<div id="map-view" class="workspace" hidden></div>
 
 <div id="item-view" class="workspace" hidden>
     <aside class="pane-detail" id="cat-pane-detail">
@@ -216,8 +222,8 @@ const renderer = (() => {
   }
 })();
 const scene  = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0603);
-scene.fog = new THREE.FogExp2(0x0a0603, 0.00002);
+scene.background = new THREE.Color(0x000000);
+scene.fog = new THREE.FogExp2(0x000000, 0.00002);
 const camera = new THREE.PerspectiveCamera(60,1,1,200000);
 
 let pointsMesh=null, linesMesh=null;
@@ -558,7 +564,7 @@ function paint2d(){
   const W=cv2.clientWidth, H=cv2.clientHeight, k=view2.k;
   if(!W||!H) return;
   ctx2.textBaseline="middle";
-  ctx2.fillStyle="#0a0603"; ctx2.fillRect(0,0,W,H);
+  ctx2.fillStyle="#000"; ctx2.fillRect(0,0,W,H);
   const lanes=graphLayout?.lanes??[], columns=graphLayout?.columns??[];
   if(lanes.length){
     const [xa]=toScreen(columns[0].x0,0), [xb]=toScreen(columns.at(-1).x1,0);
@@ -637,7 +643,7 @@ function paint2d(){
     const w=ctx2.measureText(text).width, h=13;
     if(boxes.some(b=>x<b.x+b.w+4&&x+w+4>b.x&&y-h/2<b.y+b.h&&y+h/2>b.y)) return;
     boxes.push({x,y:y-h/2,w,h});
-    ctx2.strokeStyle="#0a0603"; ctx2.lineWidth=3; ctx2.strokeText(text,x,y);
+    ctx2.strokeStyle="#000"; ctx2.lineWidth=3; ctx2.strokeText(text,x,y);
     ctx2.fillStyle=n.id===selectedId?"#ffffff":"#c9d1e6"; ctx2.fillText(text,x,y);
   });
 
@@ -795,6 +801,7 @@ fetch("data/concept_graph.json").then(r=>r.json()).then(data=>{
   buildEdgeIndex();
   const counts = {};
   allNodes.forEach(n => { counts[n.stage] = (counts[n.stage] ?? 0) + 1; });
+  counts.all = allNodes.length;
   document.querySelectorAll("[data-count]").forEach(el => { el.textContent = counts[el.dataset.count] ?? 0; });
   route();
 });
@@ -824,6 +831,7 @@ function catConfBadge(c) {
 function catLayerBadge(l) { return catBadge(l==="scientific"?"badge-sci":"badge-spec", l); }
 
 function catCmp(a, b) {
+  if (catSortKey === "stage") return (STAGE_ORDER.indexOf(a.stage)-STAGE_ORDER.indexOf(b.stage))*catSortDir;
   if (catSortKey === "flags") return ((b.is_barrier+b.is_choice+(b.is_enabler||0))-(a.is_barrier+a.is_choice+(a.is_enabler||0)))*catSortDir;
   if (catSortKey === "links") return ((degreeMap[b.id]??0)-(degreeMap[a.id]??0))*catSortDir;
   return (a[catSortKey]??"").localeCompare(b[catSortKey]??"")*catSortDir;
@@ -841,7 +849,8 @@ function catRenderRows(concepts) {
     const enabler = c.is_enabler ? `<span class="flag flag-active" title="Enabler">→</span>` : "";
     return `<tr data-id="${c.id}"${c.id === itemFocus ? ' class="active"' : ""}>
       <td>${esc(c.name)}</td>
-      <td><span class="flag">${c.domain}</span></td>
+      <td class="col-stage">${esc(STAGE_LABELS[c.stage] ?? c.stage)}</td>
+      <td><span class="flag dom dom-${esc(c.domain)}">${esc(c.domain)}</span></td>
       <td>${catLayerBadge(c.layer)}</td>
       <td><span class="flag">${c.maturity}</span></td>
       <td>${catConfBadge(c.confidence)}</td>
@@ -865,8 +874,10 @@ function catFilterSort() {
   });
 }
 
-function catLoadStage(stage) {
-  catAllConcepts = allNodes.filter(c => c.stage === stage);
+function catLoadStage(key) {
+  const set = new Set(parseStages(key));
+  catAllConcepts = allNodes.filter(c => set.has(c.stage));
+  document.getElementById("cat-table").classList.toggle("multi-stage", set.size > 1);
   catFilterSort();
 }
 
@@ -903,10 +914,26 @@ function catCloseDetail() {
   if (catActiveRow) { catActiveRow.classList.remove("active"); catActiveRow = null; }
 }
 
-// Stage nav
+// Stage nav: click = one stage, shift-click = range, ctrl/cmd-click = add/remove
+let anchorStage = null;
 document.getElementById("cat-stage-nav").addEventListener("click", e => {
   const btn = e.target.closest(".stage-btn");
-  if (btn) go(`#/stage/${btn.dataset.stage}`);
+  if (!btn) return;
+  const s = btn.dataset.stage;
+  if (s === "all") { anchorStage = null; go("#/stage/all"); return; }
+  let sel = currentView === "catalog" ? parseStages(catStage) : [];
+  if (e.shiftKey && anchorStage) {
+    const [a, b] = [STAGE_ORDER.indexOf(anchorStage), STAGE_ORDER.indexOf(s)].sort((x, y) => x - y);
+    sel = STAGE_ORDER.slice(a, b + 1);
+  } else if (e.ctrlKey || e.metaKey) {
+    sel = sel.includes(s) ? sel.filter(x => x !== s) : [...sel, s];
+    if (!sel.length) sel = [s];
+    anchorStage = s;
+  } else {
+    sel = [s];
+    anchorStage = s;
+  }
+  go(`#/stage/${stageKey(sel)}`);
 });
 
 // Table row click
@@ -943,13 +970,34 @@ function catGoTo(targetId) {
 
 // ── Navigation: HTML5 history with hash routes  #/stage/<S>  #/item/<id>  #/2d  #/3d ──
 const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
-const STAGE_LABELS = Object.fromEntries([...document.querySelectorAll("#cat-stage-nav .stage-btn")]
+const STAGE_LABELS = Object.fromEntries([...document.querySelectorAll("#cat-stage-nav .stage-btn:not(.stage-all)")]
   .map(b => [b.dataset.stage, b.querySelector(".stage-label").textContent]));
+const STAGE_ORDER = Object.keys(STAGE_LABELS);
 let currentView = "catalog";
+
+// a stage key is one stage, a comma-separated list, or "all"
+function parseStages(key){
+  if(key==="all") return [...STAGE_ORDER];
+  return STAGE_ORDER.filter(s=>(key??"").split(",").includes(s));
+}
+function stageKey(stages){
+  const set=new Set(stages), list=STAGE_ORDER.filter(s=>set.has(s));
+  return list.length===STAGE_ORDER.length ? "all" : list.join(",");
+}
+function stageTitle(key){
+  if(key==="all") return "All stages";
+  const runs=[];
+  for(const s of parseStages(key)){
+    const i=STAGE_ORDER.indexOf(s), r=runs.at(-1);
+    if(r && r[1]===i-1) r[1]=i; else runs.push([i,i]);
+  }
+  const L=i=>STAGE_LABELS[STAGE_ORDER[i]];
+  return runs.map(([a,b])=>a===b ? L(a) : `${L(a)} – ${L(b)}`).join(" + ");
+}
 
 function currentTitle(){
   if(currentView==="item") return nodeById[itemFocus]?.name ?? "Item";
-  if(currentView==="catalog") return STAGE_LABELS[catStage] ?? "Catalog";
+  if(currentView==="catalog") return stageTitle(catStage ?? "K0_EARTH");
   return currentView.toUpperCase();
 }
 function go(hash){
@@ -961,8 +1009,12 @@ function goBack(){
   if(history.state?.inApp) history.back();
   else { history.replaceState(null, "", `#/stage/${catStage ?? "K0_EARTH"}`); route(); }
 }
-function setSidebarStage(stage){
-  document.querySelectorAll("#cat-stage-nav .stage-btn").forEach(b=>b.classList.toggle("active", b.dataset.stage===stage));
+function setSidebarStage(key, single){
+  const sel=new Set(single ? [key] : key==="all" ? [] : parseStages(key));
+  const nav=document.getElementById("cat-stage-nav");
+  nav.classList.toggle("multi", sel.size>1);
+  nav.querySelectorAll(".stage-btn").forEach(b=>b.classList.toggle("active",
+    b.dataset.stage==="all" ? !single && key==="all" : sel.has(b.dataset.stage)));
 }
 function route(){
   if(!allNodes.length) return;
@@ -971,20 +1023,21 @@ function route(){
     const c=nodeById[+arg];
     itemFocus=c.id;
     setItemFocus(c.id);
-    document.getElementById("back-label").textContent = history.state?.prev ?? STAGE_LABELS[catStage] ?? "Catalog";
+    document.getElementById("back-label").textContent = history.state?.prev ?? stageTitle(catStage ?? "K0_EARTH");
     document.getElementById("crumbs").innerHTML =
       `<a href="#/stage/${esc(c.stage)}">${esc(STAGE_LABELS[c.stage] ?? c.stage)}</a> › <strong>${esc(c.name)}</strong>`;
     document.title=`${c.name} — Kadastra`;
-    setSidebarStage(c.stage);
+    setSidebarStage(c.stage, true);
     showView("item");
     return;
   }
   if(kind==="2d"||kind==="3d"){ document.title="Kadastra"; showView(kind); return; }
-  const stage = kind==="stage" && STAGE_LABELS[arg] ? arg : catStage ?? "K0_EARTH";
-  if(stage!==catStage){ catStage=stage; catLoadStage(stage); }
-  setSidebarStage(stage);
-  document.getElementById("cat-title").textContent = STAGE_LABELS[stage];
-  document.title=`${STAGE_LABELS[stage]} — Kadastra`;
+  if(kind==="map"||!kind){ document.title="Kadastra"; showView("map"); return; }
+  const key = kind==="stage" && parseStages(arg).length ? stageKey(parseStages(arg)) : catStage ?? "K0_EARTH";
+  if(key!==catStage){ catStage=key; catLoadStage(key); }
+  setSidebarStage(key);
+  document.getElementById("cat-title").textContent = stageTitle(key);
+  document.title=`${stageTitle(key)} — Kadastra`;
   showView("catalog");
   catActiveRow?.scrollIntoView({block:"nearest"});
 }
@@ -1012,28 +1065,37 @@ document.addEventListener("keydown", e=>{
 let itemFocus=null;
 function setItemFocus(id){
   itemFocus=id;
-  const b=document.getElementById("btn-view-item");
-  b.disabled=false; b.title=allNodes.find(n=>n.id===id)?.name??"";
 }
 function renderTreeView(){
   if(!allNodes.some(n=>n.id===itemFocus)) return;
   TechTree.render(document.getElementById("tree-view"), {nodes:allNodes, edges:allEdges}, itemFocus, {onSelect:catGoTo});
 }
 
-// View toggle: catalog | item | 2d | 3d
+// Presentation: map | list | 2d | 3d; an item is pushed onto whichever presentation opened it
 const fitted={};
+let presentation="map", mapRendered=false;
 function showView(mode){
   currentView=mode;
+  if(mode!=="item") presentation=mode;
   const graph=mode==="2d"||mode==="3d";
-  document.getElementById("sidebar").hidden        = graph;
+  document.getElementById("sidebar").hidden        = graph || mode==="map";
+  document.getElementById("map-view").hidden       = mode!=="map";
   document.getElementById("item-nav").hidden       = mode!=="item";
   document.getElementById("cv-wrap").hidden        = !graph;
   document.getElementById("graph-controls").hidden  = !graph;
   document.getElementById("catalog-view").hidden    = mode!=="catalog";
   document.getElementById("cat-controls").hidden    = mode!=="catalog";
   document.getElementById("item-view").hidden       = mode!=="item";
-  ["catalog","item","2d","3d"].forEach(m=>document.getElementById(`btn-view-${m}`).classList.toggle("on",m===mode));
+  ["map","catalog","2d","3d"].forEach(m=>{
+    const on = m===presentation;
+    const b=document.getElementById(`btn-view-${m}`);
+    b.classList.toggle("on",on); b.setAttribute("aria-checked",on);
+  });
   if(mode==="item"){ catOpenDetail(itemFocus); return; }
+  if(mode==="map"&&!mapRendered){
+    mapRendered=true;
+    Roadmap.render(document.getElementById("map-view"), {nodes:allNodes, edges:allEdges, layout:graphLayout}, {onSelect:catGoTo});
+  }
   if(!graph) return;
   graphMode=mode;
   canvas.style.display = mode==="3d"?"block":"none";
@@ -1045,8 +1107,8 @@ function showView(mode){
     draw2d();
   });
 }
+document.getElementById("btn-view-map").addEventListener("click",()=>go("#/map"));
 document.getElementById("btn-view-catalog").addEventListener("click",()=>go(`#/stage/${catStage ?? "K0_EARTH"}`));
-document.getElementById("btn-view-item").addEventListener("click",()=>itemFocus!=null && go(`#/item/${itemFocus}`));
 document.getElementById("btn-open-item").addEventListener("click",()=>itemFocus!=null && go(`#/item/${itemFocus}`));
 document.getElementById("btn-view-2d").addEventListener("click",()=>go("#/2d"));
 document.getElementById("btn-view-3d").addEventListener("click",()=>go("#/3d"));
