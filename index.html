@@ -538,7 +538,8 @@ function fitCamera(){
 const cv2=document.getElementById("cv2d"), ctx2=cv2.getContext("2d");
 let graphMode="2d", graphLayout=null, maxDegree=1, drawQueued=false, nodeById={};
 const view2={cx:0, cy:0, k:0.05, ky:0.05};  // world centre (x, flipped y); pixels per world unit horizontally / vertically
-const LABEL_W=120, HEADER_H=28;
+let LABEL_W=120;
+const HEADER_H=28;
 const hex=n=>"#"+n.toString(16).padStart(6,"0");
 const toScreen=(x,y)=>[(x-view2.cx)*view2.k+cv2.clientWidth/2, (-y-view2.cy)*view2.ky+cv2.clientHeight/2];
 
@@ -546,6 +547,7 @@ function resize2d(){
   const dpr=Math.min(devicePixelRatio,2);
   cv2.width=Math.round(cv2.clientWidth*dpr); cv2.height=Math.round(cv2.clientHeight*dpr);
   ctx2.setTransform(dpr,0,0,dpr,0,0);
+  LABEL_W=cv2.clientWidth<600?90:120;
   draw2d();
 }
 function draw2d(){
@@ -655,6 +657,7 @@ function paint2d(){
       const [xa]=toScreen(c.x0,0), [xb]=toScreen(c.x1,0);
       if(xb<LABEL_W||xa>W) return;
       const text=xb-xa>220?`${c.stage} · ${c.label}`:c.stage;
+      if(ctx2.measureText(text).width>xb-xa-6) return;
       ctx2.fillStyle="#ffe2b8";
       ctx2.fillText(text,Math.min(Math.max((xa+xb)/2,LABEL_W+60),W-60),HEADER_H/2);
     });
@@ -670,11 +673,11 @@ function paint2d(){
   }
 }
 
-function nodeAt2d(mx,my){
+function nodeAt2d(mx,my,slop=5){
   let best=null, bd=Infinity;
   currentNodes.forEach(n=>{
     const [x,y]=toScreen(n.pos_x??0,n.pos_y??0), d=Math.hypot(x-mx,y-my);
-    if(d<nodeRadius2d(n)+5&&d<bd){ best=n; bd=d; }
+    if(d<nodeRadius2d(n)+slop&&d<bd){ best=n; bd=d; }
   });
   return best;
 }
@@ -732,6 +735,49 @@ cv2.addEventListener("wheel",e=>{
   view2.cx=wx-mx/view2.k; view2.cy=wy-my/view2.ky;
   draw2d();
 },{passive:false});
+
+// touch: one finger pans, two fingers pinch-zoom around their midpoint, a tap selects
+const touches=new Map();
+let pinch=null, tapStart=null;
+cv2.style.touchAction="none";
+cv2.addEventListener("pointerdown",e=>{
+  if(e.pointerType==="mouse") return;
+  e.preventDefault(); cv2.setPointerCapture(e.pointerId);
+  touches.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  tapStart=touches.size===1?{x:e.clientX,y:e.clientY}:null;
+  pinch=null;
+});
+cv2.addEventListener("pointermove",e=>{
+  const prev=touches.get(e.pointerId);
+  if(!prev) return;
+  const cur={x:e.clientX,y:e.clientY};
+  if(touches.size===1){
+    view2.cx-=(cur.x-prev.x)/view2.k; view2.cy-=(cur.y-prev.y)/view2.ky;
+  } else if(touches.size===2){
+    const [a,b]=[...touches].map(([id,p])=>id===e.pointerId?cur:p), r=cv2.getBoundingClientRect();
+    const d=Math.hypot(a.x-b.x,a.y-b.y), mx=(a.x+b.x)/2-r.left-cv2.clientWidth/2, my=(a.y+b.y)/2-r.top-cv2.clientHeight/2;
+    if(pinch){
+      const f=d/pinch.d, wx=pinch.mx/view2.k+view2.cx, wy=pinch.my/view2.ky+view2.cy;
+      view2.k=Math.min(3,Math.max(0.003,view2.k*f)); view2.ky=Math.min(3,Math.max(0.003,view2.ky*f));
+      view2.cx=wx-mx/view2.k; view2.cy=wy-my/view2.ky;
+    }
+    pinch={d,mx,my};
+  }
+  touches.set(e.pointerId,cur);
+  if(tapStart&&Math.hypot(cur.x-tapStart.x,cur.y-tapStart.y)>8) tapStart=null;
+  draw2d();
+});
+const endTouch=e=>{
+  if(!touches.delete(e.pointerId)) return;
+  pinch=null;
+  if(tapStart&&e.type==="pointerup"&&!touches.size){
+    const r=cv2.getBoundingClientRect();
+    selectNode(nodeAt2d(e.clientX-r.left,e.clientY-r.top,14));
+  }
+  tapStart=null;
+};
+cv2.addEventListener("pointerup",endTouch);
+cv2.addEventListener("pointercancel",endTouch);
 
 function fitCurrent(){ graphMode==="2d" ? fit2d() : fitCamera(); }
 
