@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "kadastra-static-v37";
+const STATIC_CACHE = "kadastra-static-v39";
 const DATA_CACHE   = "kadastra-data-v1";
 const STATIC_URLS  = [
   "./",
