@@ -216,8 +216,8 @@ const renderer = (() => {
   }
 })();
 const scene  = new THREE.Scene();
-scene.background = new THREE.Color(0x0f1117);
-scene.fog = new THREE.FogExp2(0x0f1117, 0.00002);
+scene.background = new THREE.Color(0x0a0603);
+scene.fog = new THREE.FogExp2(0x0a0603, 0.00002);
 const camera = new THREE.PerspectiveCamera(60,1,1,200000);
 
 let pointsMesh=null, linesMesh=null;
@@ -558,7 +558,7 @@ function paint2d(){
   const W=cv2.clientWidth, H=cv2.clientHeight, k=view2.k;
   if(!W||!H) return;
   ctx2.textBaseline="middle";
-  ctx2.fillStyle="#0f1117"; ctx2.fillRect(0,0,W,H);
+  ctx2.fillStyle="#0a0603"; ctx2.fillRect(0,0,W,H);
   const lanes=graphLayout?.lanes??[], columns=graphLayout?.columns??[];
   if(lanes.length){
     const [xa]=toScreen(columns[0].x0,0), [xb]=toScreen(columns.at(-1).x1,0);
@@ -637,7 +637,7 @@ function paint2d(){
     const w=ctx2.measureText(text).width, h=13;
     if(boxes.some(b=>x<b.x+b.w+4&&x+w+4>b.x&&y-h/2<b.y+b.h&&y+h/2>b.y)) return;
     boxes.push({x,y:y-h/2,w,h});
-    ctx2.strokeStyle="#0f1117"; ctx2.lineWidth=3; ctx2.strokeText(text,x,y);
+    ctx2.strokeStyle="#0a0603"; ctx2.lineWidth=3; ctx2.strokeText(text,x,y);
     ctx2.fillStyle=n.id===selectedId?"#ffffff":"#c9d1e6"; ctx2.fillText(text,x,y);
   });
 
@@ -649,7 +649,7 @@ function paint2d(){
       const [xa]=toScreen(c.x0,0), [xb]=toScreen(c.x1,0);
       if(xb<LABEL_W||xa>W) return;
       const text=xb-xa>220?`${c.stage} · ${c.label}`:c.stage;
-      ctx2.fillStyle="#c9d1e6";
+      ctx2.fillStyle="#ffe2b8";
       ctx2.fillText(text,Math.min(Math.max((xa+xb)/2,LABEL_W+60),W-60),HEADER_H/2);
     });
     ctx2.textAlign="right";
